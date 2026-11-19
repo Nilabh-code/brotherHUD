@@ -1,0 +1,3342 @@
+<!DOCTYPE html>
+<html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>ATHLETE HUD — AR Sports Performance, Navigation & Safety System</title>
+
+    <!--
+    =============================================================================================
+    PROJECT: ATHLETE HUD — AR SPORTS PERFORMANCE, NAVIGATION & SAFETY SYSTEM
+    Target Platform: Meta Quest 3S (WebXR Passthrough AR) & Windows Desktop Browser Fallback
+    Framework: A-Frame 1.6.0 (CDN Hosted)
+    Architecture: Modular JavaScript with Centralized Event-Driven State Management
+    Classes: HUDManager, NavigationManager, MovementTracker, StopwatchManager, MinimapManager,
+             TeamTracker, HealthMonitor, WearableConnector, EmergencyManager, SportTrainingManager,
+             QuestInputManager, DesktopInputManager, SimulationManager
+    Hardware Integration: Web Bluetooth API (GATT 0x180D Heart Rate), Geolocation API,
+                          DeviceOrientationEvent (Compass Heading), DeviceMotionEvent (Impact G-Force),
+                          WebXR Gamepad API (Quest 3S Controllers & Raycaster)
+    =============================================================================================
+    USAGE & CONTROLS INSTRUCTIONS:
+    
+    1. META QUEST 3S (IMMERSIVE AR / VR):
+       - Put on your Meta Quest 3S headset and open this URL in the Meta Quest Browser.
+       - Click "ENTER AR (QUEST 3S)" or the VR/AR goggles icon in the bottom-right corner.
+       - Passthrough AR will activate, overlaying the tactical HUD on your real-world environment.
+       - Right Controller: Point the cyan laser raycaster at HUD controls and pull Trigger to interact.
+       - Left Controller: Glancing at your left wrist displays the Virtual Wrist-Mounted Watch HUD.
+       - Left Thumbstick: Move athlete in virtual simulation space (forward, back, strafe).
+       - Right Thumbstick: Rotate view angle and compass heading.
+       - In-Headset HUD: Ergonomically positioned in peripheral view with zero center-of-gaze clutter.
+
+<head>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    2. WINDOWS DESKTOP (STANDARD BROWSER):
+       - Click and drag mouse to inspect the AR scene in 3D, or click 2D HUD buttons directly.
+       - [W, A, S, D]: Move athlete in virtual world (accumulates real distance, pace & velocity).
+       - [Arrow Keys Up/Down]: Accelerate or decelerate speed (+/- km/h).
+       - [Arrow Keys Left/Right]: Turn compass heading in degrees.
+       - [Spacebar]: Pause or resume workout activity & telemetry recording.
+       - [T]: Stopwatch control (Start / Lap / Split / Stop).
+       - [M]: Toggle Tactical Minimap Radar on/off.
+       - [H]: Toggle Health & Biometrics Monitoring Panel on/off.
+       - [N]: Toggle AR Route Guidance & Waypoint Navigation Panel on/off.
+       - [S]: Open Sport-Specific AI Training Console (Running, Cricket, Swimming, Cycling, Pool, Football).
+       - [E]: Trigger Emergency SOS Safety Protocol (Fall / Medical Alarm Countdown).
+       - [ESC]: Open Calibration & System Hardware Settings Dialog.
+    =============================================================================================
+  -->
+
+    <!-- A-Frame CDN -->
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+
+    <style>
+        /* ==========================================================================
+       TACTICAL AEROSPACE HUD STYLESHEET
+       Theme: Stealth Matte Glass, Electric Cyan (#00f0ff), Emerald (#00ff88),
+              Amber Warning (#ffb700), Critical Crimson (#ff0055)
+       ========================================================================== */
+        :root {
+            --hud-cyan: #00f0ff;
+            --hud-cyan-dim: rgba(0, 240, 255, 0.22);
+            --hud-cyan-glow: rgba(0, 240, 255, 0.45);
+            --hud-blue: #0072ff;
+            --hud-green: #00ff88;
+            --hud-green-glow: rgba(0, 255, 136, 0.4);
+            --hud-amber: #ffb700;
+            --hud-red: #ff0055;
+            --hud-red-glow: rgba(255, 0, 85, 0.5);
+            --hud-bg-glass: rgba(6, 14, 26, 0.82);
+            --hud-bg-glass-card: rgba(8, 18, 34, 0.86);
+            --hud-border: 1px solid rgba(0, 240, 255, 0.32);
+            --hud-border-active: 1px solid rgba(0, 255, 136, 0.6);
+            --hud-font-mono: 'SF Pro Text', 'Rajdhani', 'SF Mono', 'Roboto Mono', 'Segoe UI', monospace;
+            --hud-font-sans: 'Rajdhani', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #03070d;
+            font-family: var(--hud-font-sans);
+            color: #e0f8ff;
+            letter-spacing: 0.5px;
+        }
+
+        /* 2D DOM Overlay Root Container for WebXR & Desktop */
+        #hud-root {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            /* Interactive items re-enable pointer-events */
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+        }
+
+        /* Interactive Class for Clickable UI in DOM Overlay */
+        .hud-interactive {
+            pointer-events: auto;
+        }
+
+        /* Scanline effect */
+        .hud-scanlines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom,
+                    rgba(255, 255, 255, 0),
+                    rgba(255, 255, 255, 0) 50%,
+                    rgba(0, 0, 0, 0.22) 50%,
+                    rgba(0, 0, 0, 0.22));
+            background-size: 100% 4px;
+            opacity: 0.35;
+            pointer-events: none;
+            z-index: 999;
+        }
+
+        /* Corner HUD brackets */
+        .hud-corner-bracket {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--hud-cyan);
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .hud-corner-bracket.tl {
+            top: 12px;
+            left: 12px;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        .hud-corner-bracket.tr {
+            top: 12px;
+            right: 12px;
+            border-left: none;
+            border-bottom: none;
+        }
+
+        .hud-corner-bracket.bl {
+            bottom: 12px;
+            left: 12px;
+            border-right: none;
+            border-top: none;
+        }
+
+        .hud-corner-bracket.br {
+            bottom: 12px;
+            right: 12px;
+            border-left: none;
+            border-top: none;
+        }
+
+        /* ==========================================================================
+       TOP BAR: COMPASS, STATUS PILLS, SATELLITE & TELEMETRY
+       ========================================================================== */
+        .hud-top-bar {
+            width: 100%;
+            padding: 10px 24px;
+            display: grid;
+            grid-template-columns: 280px 1fr 340px;
+            align-items: center;
+            gap: 16px;
+            background: linear-gradient(180deg, rgba(4, 10, 20, 0.92) 0%, rgba(4, 10, 20, 0.15) 100%);
+            border-bottom: 1px solid rgba(0, 240, 255, 0.18);
+        }
+
+        .hud-system-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .hud-logo-icon {
+            width: 28px;
+            height: 28px;
+            border: 1px solid var(--hud-cyan);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 8px var(--hud-cyan-glow);
+        }
+
+        .hud-logo-icon::after {
+            content: '';
+            width: 10px;
+            height: 10px;
+            background: var(--hud-cyan);
+            clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+        }
+
+        .hud-brand-title {
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: #fff;
+            text-transform: uppercase;
+            text-shadow: 0 0 8px var(--hud-cyan-glow);
+        }
+
+        .hud-brand-sub {
+            font-size: 9px;
+            color: var(--hud-cyan);
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+
+        /* DIGITAL COMPASS RIBBON */
+        .hud-compass-wrapper {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow: hidden;
+            width: 100%;
+            max-width: 580px;
+            margin: 0 auto;
+        }
+
+        .hud-compass-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 2px;
+        }
+
+        .hud-compass-heading {
+            font-family: var(--hud-font-mono);
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
+            text-shadow: 0 0 10px var(--hud-cyan);
+        }
+
+        .hud-compass-cardinal {
+            font-size: 13px;
+            font-weight: 800;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: rgba(0, 240, 255, 0.2);
+            color: var(--hud-cyan);
+            border: 1px solid var(--hud-cyan);
+        }
+
+        .hud-compass-tape-container {
+            position: relative;
+            width: 100%;
+            height: 28px;
+            background: rgba(4, 12, 22, 0.7);
+            border-radius: 4px;
+            border: 1px solid rgba(0, 240, 255, 0.28);
+            overflow: hidden;
+            mask-image: linear-gradient(to right, transparent, black 18%, black 82%, transparent);
+            -webkit-mask-image: linear-gradient(to right, transparent, black 18%, black 82%, transparent);
+        }
+
+        .hud-compass-reticle {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 50%;
+            width: 2px;
+            transform: translateX(-50%);
+            background: var(--hud-cyan);
+            box-shadow: 0 0 8px var(--hud-cyan);
+            z-index: 5;
+        }
+
+        .hud-compass-reticle::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -4px;
+            width: 10px;
+            height: 5px;
+            background: var(--hud-cyan);
+            clip-path: polygon(0% 0%, 100% 0%, 50% 100%);
+        }
+
+        .hud-compass-tape {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            transition: transform 0.08s linear;
+            will-change: transform;
+        }
+
+        .hud-compass-tick {
+            width: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            flex-shrink: 0;
+            color: rgba(220, 245, 255, 0.55);
+            font-size: 8px;
+            font-family: var(--hud-font-mono);
+        }
+
+        .hud-compass-tick.major {
+            color: var(--hud-cyan);
+            font-weight: 700;
+            font-size: 9px;
+        }
+
+        .hud-compass-tick-bar {
+            width: 1px;
+            height: 7px;
+            background: rgba(0, 240, 255, 0.4);
+            margin-bottom: 2px;
+        }
+
+        .hud-compass-tick.major .hud-compass-tick-bar {
+            height: 12px;
+            background: var(--hud-cyan);
+            box-shadow: 0 0 4px var(--hud-cyan);
+        }
+
+        /* TOP RIGHT TELEMETRY PILLS */
+        .hud-top-right {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .hud-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            background: var(--hud-bg-glass);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: #9fe7ff;
+            text-transform: uppercase;
+            box-shadow: inset 0 0 6px rgba(0, 240, 255, 0.1);
+            cursor: pointer;
+        }
+
+        .hud-pill.active {
+            border-color: var(--hud-green);
+            color: var(--hud-green);
+            box-shadow: 0 0 8px rgba(0, 255, 136, 0.2);
+        }
+
+        .hud-pill.live-mode {
+            background: rgba(0, 255, 136, 0.15);
+            border-color: var(--hud-green);
+            color: var(--hud-green);
+        }
+
+        .hud-pill.sim-mode {
+            background: rgba(255, 183, 0, 0.15);
+            border-color: var(--hud-amber);
+            color: var(--hud-amber);
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #4a5c68;
+        }
+
+        .status-dot.active {
+            background: var(--hud-green);
+            box-shadow: 0 0 6px var(--hud-green);
+            animation: pulse 1.6s infinite ease-in-out;
+        }
+
+        .status-dot.amber {
+            background: var(--hud-amber);
+            box-shadow: 0 0 6px var(--hud-amber);
+        }
+
+        .status-dot.danger {
+            background: var(--hud-red);
+            box-shadow: 0 0 8px var(--hud-red);
+            animation: pulse 0.8s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.4;
+                transform: scale(0.85);
+            }
+        }
+
+        /* ==========================================================================
+       MAIN CENTER BODY: SPLIT VIEW WITH FLANKING GLASS PANELS
+       ========================================================================== */
+        .hud-main-body {
+            width: 100%;
+            flex: 1;
+            display: grid;
+            grid-template-columns: 310px 1fr 320px;
+            padding: 10px 24px;
+            gap: 16px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* GLASS CARD BASE */
+        .hud-card {
+            background: var(--hud-bg-glass-card);
+            border: var(--hud-border);
+            border-radius: 8px;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 12px rgba(0, 240, 255, 0.05);
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            transition: all 0.25s ease;
+        }
+
+        .hud-card:hover {
+            border-color: rgba(0, 240, 255, 0.55);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 240, 255, 0.15);
+        }
+
+        .hud-card.hidden {
+            display: none !important;
+        }
+
+        .hud-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+            padding-bottom: 6px;
+            margin-bottom: 10px;
+        }
+
+        .hud-card-title {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1.8px;
+            text-transform: uppercase;
+            color: var(--hud-cyan);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .hud-card-tools {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* BUTTONS */
+        .hud-btn {
+            background: rgba(0, 240, 255, 0.1);
+            border: 1px solid rgba(0, 240, 255, 0.35);
+            color: #d6f6ff;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.18s ease;
+            font-family: var(--hud-font-sans);
+        }
+
+        .hud-btn:hover {
+            background: rgba(0, 240, 255, 0.26);
+            border-color: var(--hud-cyan);
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.35);
+            transform: translateY(-1px);
+        }
+
+        .hud-btn:active {
+            transform: translateY(0);
+        }
+
+        .hud-btn.success {
+            background: rgba(0, 255, 136, 0.12);
+            border-color: var(--hud-green);
+            color: var(--hud-green);
+        }
+
+        .hud-btn.success:hover {
+            background: rgba(0, 255, 136, 0.28);
+            box-shadow: 0 0 10px var(--hud-green-glow);
+        }
+
+        .hud-btn.danger {
+            background: rgba(255, 0, 85, 0.15);
+            border-color: var(--hud-red);
+            color: var(--hud-red);
+        }
+
+        .hud-btn.danger:hover {
+            background: rgba(255, 0, 85, 0.35);
+            box-shadow: 0 0 12px var(--hud-red-glow);
+        }
+
+        .hud-btn.icon-only {
+            padding: 5px;
+            width: 26px;
+            height: 26px;
+        }
+
+        /* LEFT COLUMN: PERFORMANCE & MOVEMENT */
+        .hud-left-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            height: 100%;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--hud-cyan-dim) transparent;
+        }
+
+        /* SPEEDOMETER WIDGET */
+        .hud-speedometer-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 6px 0;
+            position: relative;
+        }
+
+        .hud-speed-gauge-svg {
+            width: 190px;
+            height: 110px;
+        }
+
+        .hud-speed-val-display {
+            position: absolute;
+            bottom: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .hud-speed-num {
+            font-family: var(--hud-font-mono);
+            font-size: 38px;
+            font-weight: 800;
+            line-height: 1;
+            color: #fff;
+            text-shadow: 0 0 14px var(--hud-cyan);
+        }
+
+        .hud-speed-unit {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--hud-cyan);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-top: 2px;
+        }
+
+        /* METRIC GRID */
+        .hud-metric-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 6px;
+        }
+
+        .hud-metric-tile {
+            background: rgba(4, 12, 22, 0.6);
+            border: 1px solid rgba(0, 240, 255, 0.18);
+            border-radius: 6px;
+            padding: 7px 10px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .hud-metric-label {
+            font-size: 9px;
+            font-weight: 700;
+            color: #89c5dc;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 2px;
+        }
+
+        .hud-metric-value {
+            font-family: var(--hud-font-mono);
+            font-size: 16px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: baseline;
+            gap: 3px;
+        }
+
+        .hud-metric-sub {
+            font-size: 9px;
+            color: var(--hud-cyan);
+            font-weight: 600;
+        }
+
+        /* ACCELERATION & G-FORCE BAR */
+        .hud-accel-bar-wrap {
+            margin-top: 8px;
+        }
+
+        .hud-progress-track {
+            width: 100%;
+            height: 6px;
+            background: rgba(0, 240, 255, 0.12);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 3px;
+        }
+
+        .hud-progress-fill {
+            height: 100%;
+            width: 30%;
+            background: linear-gradient(90deg, var(--hud-cyan), var(--hud-green));
+            border-radius: 3px;
+            transition: width 0.2s ease;
+            box-shadow: 0 0 8px var(--hud-cyan-glow);
+        }
+
+        /* CENTER AREA: 3D AR VIEWPORT & FLOATING AR WIDGETS */
+        .hud-center-view {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            pointer-events: none;
+        }
+
+        /* AR FLIGHT PATH DIRECTION ARROW (CENTER HUD) */
+        .hud-ar-nav-target {
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: rgba(6, 16, 28, 0.78);
+            border: 1px solid rgba(0, 240, 255, 0.35);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 6px 16px;
+            box-shadow: 0 0 16px rgba(0, 240, 255, 0.15);
+            animation: floatNav 3s infinite ease-in-out;
+            transition: opacity 0.3s ease;
+        }
+
+        .hud-ar-nav-target.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        @keyframes floatNav {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-4px);
+            }
+        }
+
+        .hud-nav-instruction {
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: 1px;
+        }
+
+        .hud-nav-arrow-icon {
+            font-size: 18px;
+            color: var(--hud-green);
+            text-shadow: 0 0 10px var(--hud-green);
+        }
+
+        .hud-nav-dist-eta {
+            font-family: var(--hud-font-mono);
+            font-size: 10px;
+            color: var(--hud-cyan);
+            margin-top: 2px;
+        }
+
+        /* CENTER BOTTOM: STOPWATCH & CONTROL DOCK */
+        .hud-dock-bar {
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(6, 14, 26, 0.88);
+            border: var(--hud-border);
+            border-radius: 30px;
+            padding: 6px 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 240, 255, 0.15);
+            backdrop-filter: blur(16px);
+            pointer-events: auto;
+        }
+
+        .hud-dock-stopwatch {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-right: 12px;
+            border-right: 1px solid rgba(0, 240, 255, 0.25);
+        }
+
+        .hud-dock-time {
+            font-family: var(--hud-font-mono);
+            font-size: 22px;
+            font-weight: 800;
+            color: #fff;
+            text-shadow: 0 0 10px var(--hud-cyan);
+        }
+
+        .hud-dock-lap-pill {
+            font-size: 9px;
+            font-family: var(--hud-font-mono);
+            background: rgba(0, 240, 255, 0.15);
+            color: var(--hud-cyan);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+        }
+
+        .hud-dock-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* RIGHT COLUMN: HEALTH & TEAMMATES */
+        .hud-right-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            height: 100%;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--hud-cyan-dim) transparent;
+        }
+
+        /* HEART RATE MONITOR CARD */
+        .hud-hr-card {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hud-hr-main {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 4px 0 8px 0;
+        }
+
+        .hud-hr-value-wrap {
+            display: flex;
+            align-items: baseline;
+            gap: 4px;
+        }
+
+        .hud-hr-number {
+            font-family: var(--hud-font-mono);
+            font-size: 42px;
+            font-weight: 800;
+            color: #fff;
+            line-height: 1;
+            text-shadow: 0 0 16px var(--hud-red);
+        }
+
+        .hud-hr-unit {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--hud-red);
+            letter-spacing: 1.5px;
+        }
+
+        .hud-pulse-heart {
+            width: 32px;
+            height: 32px;
+            color: var(--hud-red);
+            animation: heartBeat 0.8s infinite ease-in-out;
+            filter: drop-shadow(0 0 8px var(--hud-red));
+        }
+
+        @keyframes heartBeat {
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            14% {
+                transform: scale(1.22);
+            }
+
+            28% {
+                transform: scale(1.05);
+            }
+
+            42% {
+                transform: scale(1.25);
+            }
+
+            70% {
+                transform: scale(1);
+            }
+        }
+
+        /* 5-ZONE HR BAR */
+        .hud-hr-zones {
+            display: flex;
+            gap: 3px;
+            margin: 6px 0;
+        }
+
+        .hud-hr-zone-segment {
+            flex: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .hud-hr-zone-segment.z1.active {
+            background: #00d2ff;
+            box-shadow: 0 0 6px #00d2ff;
+        }
+
+        .hud-hr-zone-segment.z2.active {
+            background: #00ff88;
+            box-shadow: 0 0 6px #00ff88;
+        }
+
+        .hud-hr-zone-segment.z3.active {
+            background: #ffea00;
+            box-shadow: 0 0 6px #ffea00;
+        }
+
+        .hud-hr-zone-segment.z4.active {
+            background: #ff8c00;
+            box-shadow: 0 0 6px #ff8c00;
+        }
+
+        .hud-hr-zone-segment.z5.active {
+            background: #ff0055;
+            box-shadow: 0 0 8px #ff0055;
+        }
+
+        .hud-hr-zone-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9px;
+            color: #9cd5e8;
+            font-weight: 600;
+            margin-top: 2px;
+        }
+
+        /* TEAMMATE COORDINATION WIDGET */
+        .hud-team-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .hud-teammate-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(4, 12, 22, 0.6);
+            border: 1px solid rgba(0, 240, 255, 0.15);
+            border-radius: 5px;
+            padding: 6px 8px;
+            font-size: 11px;
+        }
+
+        .hud-teammate-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .hud-teammate-badge {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--hud-cyan);
+        }
+
+        .hud-teammate-name {
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .hud-teammate-status {
+            font-size: 9px;
+            color: #8ed6ec;
+        }
+
+        .hud-teammate-dist {
+            font-family: var(--hud-font-mono);
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--hud-cyan);
+        }
+
+        /* ==========================================================================
+       TACTICAL MINIMAP RADAR PANEL (OVERLAY)
+       ========================================================================== */
+        .hud-minimap-card {
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            width: 260px;
+            background: var(--hud-bg-glass-card);
+            border: var(--hud-border);
+            border-radius: 8px;
+            backdrop-filter: blur(14px);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            z-index: 1005;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+
+        .hud-minimap-card.hidden {
+            transform: translateX(-320px);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .hud-minimap-canvas-wrap {
+            width: 100%;
+            height: 170px;
+            background: radial-gradient(circle, rgba(0, 30, 50, 0.8) 0%, rgba(2, 8, 16, 0.95) 100%);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 6px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #minimap-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Radar sweep animation overlay */
+        .hud-radar-sweep {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 170px;
+            height: 170px;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            background: conic-gradient(from 0deg, rgba(0, 240, 255, 0.3) 0deg, rgba(0, 240, 255, 0) 65deg, transparent 65deg);
+            animation: radarSpin 4s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes radarSpin {
+            from {
+                transform: translate(-50%, -50%) rotate(0deg);
+            }
+
+            to {
+                transform: translate(-50%, -50%) rotate(360deg);
+            }
+        }
+
+        /* ==========================================================================
+       SPORT SPECIFIC TRAINING MODAL / DRAWER
+       ========================================================================== */
+        .hud-sport-modal {
+            position: absolute;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 780px;
+            max-height: 82vh;
+            background: rgba(6, 14, 26, 0.94);
+            border: 1px solid var(--hud-cyan);
+            border-radius: 12px;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(0, 240, 255, 0.2);
+            z-index: 1050;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            overflow-y: auto;
+            transition: all 0.3s ease;
+        }
+
+        .hud-sport-modal.hidden {
+            display: none;
+        }
+
+        .hud-sport-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.25);
+            padding-bottom: 10px;
+        }
+
+        .hud-sport-tab-btn {
+            padding: 8px 14px;
+            border-radius: 6px;
+            background: rgba(0, 240, 255, 0.08);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            color: #baeaff;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .hud-sport-tab-btn:hover {
+            background: rgba(0, 240, 255, 0.22);
+            color: #fff;
+        }
+
+        .hud-sport-tab-btn.active {
+            background: rgba(0, 240, 255, 0.3);
+            border-color: var(--hud-cyan);
+            color: #fff;
+            box-shadow: 0 0 12px var(--hud-cyan-glow);
+        }
+
+        .hud-sport-content {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* Sport Training Interactive Canvas / Visualization */
+        .hud-sport-canvas-wrap {
+            width: 100%;
+            height: 220px;
+            background: #020812;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #sport-viz-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* ==========================================================================
+       EMERGENCY SOS OVERLAY & COUNTDOWN
+       ========================================================================== */
+        .hud-emergency-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(255, 0, 85, 0.35) 0%, rgba(40, 0, 10, 0.95) 85%);
+            backdrop-filter: blur(16px);
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            text-align: center;
+            animation: emergencyPulse 1.2s infinite ease-in-out;
+            pointer-events: auto;
+        }
+
+        .hud-emergency-overlay.hidden {
+            display: none;
+        }
+
+        @keyframes emergencyPulse {
+
+            0%,
+            100% {
+                box-shadow: inset 0 0 60px rgba(255, 0, 85, 0.5);
+            }
+
+            50% {
+                box-shadow: inset 0 0 140px rgba(255, 0, 85, 0.85);
+            }
+        }
+
+        .hud-emergency-beacon {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 3px solid var(--hud-red);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            color: #fff;
+            box-shadow: 0 0 30px var(--hud-red);
+            margin-bottom: 16px;
+            animation: pulse 0.7s infinite;
+        }
+
+        .hud-emergency-title {
+            font-size: 28px;
+            font-weight: 900;
+            letter-spacing: 3px;
+            color: #fff;
+            text-shadow: 0 0 20px var(--hud-red);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .hud-emergency-reason {
+            font-size: 14px;
+            color: #ffb8cf;
+            max-width: 500px;
+            margin-bottom: 20px;
+        }
+
+        .hud-emergency-countdown {
+            font-family: var(--hud-font-mono);
+            font-size: 72px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 0 30px var(--hud-red);
+            line-height: 1;
+            margin-bottom: 24px;
+        }
+
+        .hud-emergency-actions {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        /* ==========================================================================
+       SETTINGS & CALIBRATION MODAL
+       ========================================================================== */
+        .hud-settings-modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            max-width: 620px;
+            background: var(--hud-bg-glass-card);
+            border: 1px solid var(--hud-cyan);
+            border-radius: 12px;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(0, 240, 255, 0.2);
+            z-index: 1060;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .hud-settings-modal.hidden {
+            display: none;
+        }
+
+        .hud-settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .hud-setting-item {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .hud-setting-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--hud-cyan);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .hud-select,
+        .hud-input {
+            background: rgba(4, 12, 22, 0.85);
+            border: 1px solid rgba(0, 240, 255, 0.35);
+            border-radius: 4px;
+            color: #fff;
+            padding: 8px 10px;
+            font-family: var(--hud-font-mono);
+            font-size: 12px;
+            outline: none;
+        }
+
+        .hud-select:focus,
+        .hud-input:focus {
+            border-color: var(--hud-cyan);
+            box-shadow: 0 0 8px var(--hud-cyan-glow);
+        }
+
+        /* ==========================================================================
+       DESKTOP CONTROLS GUIDE WIDGET
+       ========================================================================== */
+        .hud-controls-helper {
+            position: absolute;
+            top: 75px;
+            right: 24px;
+            background: rgba(6, 14, 26, 0.85);
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 10px;
+            color: #8ed6ec;
+            backdrop-filter: blur(10px);
+            z-index: 1002;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            transition: opacity 0.3s;
+        }
+
+        .hud-key-badge {
+            display: inline-block;
+            padding: 1px 5px;
+            background: rgba(0, 240, 255, 0.15);
+            border: 1px solid rgba(0, 240, 255, 0.4);
+            border-radius: 3px;
+            font-family: var(--hud-font-mono);
+            font-weight: 700;
+            color: #fff;
+            margin-right: 4px;
+        }
+
+        /* NOTIFICATION TOAST */
+        .hud-toast-banner {
+            position: absolute;
+            top: 68px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: rgba(4, 16, 30, 0.92);
+            border: 1px solid var(--hud-cyan);
+            border-radius: 8px;
+            padding: 10px 20px;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 15px var(--hud-cyan-glow);
+            z-index: 1080;
+            transition: transform 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .hud-toast-banner.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 900px) {
+            .hud-top-bar {
+                grid-template-columns: 1fr;
+                padding: 8px 12px;
+            }
+
+            .hud-main-body {
+                grid-template-columns: 1fr;
+                overflow-y: auto;
+            }
+
+            .hud-controls-helper {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- The webxr component requests passthrough (AR) -->
+    <a-scene webxr="requiredFeatures: immersive-ar, local-floor; optionalFeatures: dom-overlay, hit-test">
+        <!-- ==========================================================================
+       A-FRAME 3D SCENE: WEBXR AR/VR & METAVERSE ENVIRONMENT
+       ========================================================================== -->
+        <a-scene
+            webxr="requiredFeatures: local-floor; optionalFeatures: dom-overlay, hand-tracking, unbounded; overlayElement: #hud-root;"
+            renderer="antialias: true; alpha: true; colorManagement: true; precision: medium;" cursor="rayOrigin: mouse"
+            raycaster="objects: .clickable, [data-interactive]; far: 20;" vr-mode-ui="enabled: true"
+            loading-screen="enabled: false" id="aframe-scene">
+            <!-- Assets -->
+            <a-assets timeout="5000">
+                <canvas id="wrist-canvas" width="512" height="512"></canvas>
+                <canvas id="hologram-hud-canvas" width="1024" height="512"></canvas>
+            </a-assets>
+
+            <!-- Your 3D content -->
+            <a-box position="0 1.5 -3" rotation="0 45 0" color="#4CC3D9" shadow></a-box>
+            <a-plane position="0 0 -4" rotation="-90 0 0" width="4" height="4" color="#7BC8A4" shadow></a-plane>
+            <!-- Camera Rig with Quest 3S Tracked Controllers & Spatial Reticle -->
+            <a-entity id="player-rig" position="0 0 0">
+                <!-- Head Camera -->
+                <a-camera id="head-camera" position="0 1.65 0" look-controls="pointerLockEnabled: false"
+                    wasd-controls="false">
+                    <!-- Floating 3D Curved HUD for In-Headset XR Viewers -->
+                    <a-entity id="vr-floating-hud" position="0 0 -1.35" visible="true">
+                        <!-- Central Holographic Reticle -->
+                        <a-ring radius-inner="0.003" radius-outer="0.007" color="#00f0ff" opacity="0.6"
+                            material="shader: flat"></a-ring>
+
+                        <!-- Virtual In-Headset Top Compass Ticker -->
+                        <a-entity position="0 0.42 0">
+                            <a-plane width="0.75" height="0.07"
+                                material="color: #040c16; opacity: 0.7; shader: flat; transparent: true"></a-plane>
+                            <a-text id="vr-hud-compass-text" value="HEADING: 045° NE" align="center" width="1.2"
+                                color="#00f0ff" position="0 0 0.005"></a-text>
+                        </a-entity>
+
+        </a-scene>
+        <!-- In-Headset Left Mini Widget (Speed & Distance) -->
+        <a-entity position="-0.58 0.15 0" rotation="0 15 0">
+            <a-plane width="0.32" height="0.22"
+                material="color: #040c16; opacity: 0.65; shader: flat; transparent: true"></a-plane>
+            <a-text id="vr-hud-speed-text" value="24.8" align="center" width="1.8" color="#ffffff"
+                position="0 0.03 0.005"></a-text>
+            <a-text value="KM/H SPEED" align="center" width="0.9" color="#00f0ff" position="0 -0.05 0.005"></a-text>
+        </a-entity>
+
+        <!-- In-Headset Right Mini Widget (Heart Rate & Zone) -->
+        <a-entity position="0.58 0.15 0" rotation="0 -15 0">
+            <a-plane width="0.32" height="0.22"
+                material="color: #040c16; opacity: 0.65; shader: flat; transparent: true"></a-plane>
+            <a-text id="vr-hud-hr-text" value="142" align="center" width="1.8" color="#ff0055"
+                position="0 0.03 0.005"></a-text>
+            <a-text id="vr-hud-zone-text" value="BPM (ZONE 3)" align="center" width="0.9" color="#ffb700"
+                position="0 -0.05 0.005"></a-text>
+        </a-entity>
+
+        <!-- In-Headset Turn Direction Indicator -->
+        <a-entity id="vr-nav-chevron" position="0 -0.32 0">
+            <a-triangle vertex-a="0 0.04 0" vertex-b="-0.04 -0.04 0" vertex-c="0.04 -0.04 0"
+                material="color: #00ff88; shader: flat"></a-triangle>
+            <a-text id="vr-nav-text" value="NEXT: 120m TURN RIGHT" align="center" width="0.9" color="#00ff88"
+                position="0 -0.06 0.005"></a-text>
+        </a-entity>
+        </a-entity>
+        </a-camera>
+
+        <!-- Meta Quest 3S Right Controller (Laser Pointer & Interactor) -->
+        <a-entity id="right-controller" laser-controls="hand: right"
+            raycaster="objects: .clickable; far: 15; lineColor: #00f0ff; lineOpacity: 0.8">
+            <a-sphere radius="0.015" color="#00f0ff" opacity="0.8" material="shader: flat"></a-sphere>
+        </a-entity>
+
+        <!-- Meta Quest 3S Left Controller (Wrist Watch HUD Mount) -->
+        <a-entity id="left-controller" laser-controls="hand: left"
+            raycaster="objects: .clickable; far: 15; lineColor: #00ff88; lineOpacity: 0.6">
+            <!-- Virtual Wrist Watch Screen: Glancing at left wrist displays fast vitals -->
+            <a-entity id="wrist-hud-anchor" position="0 0.04 0.1" rotation="-40 85 -90" class="clickable">
+                <!-- Watch Bezel -->
+                <a-box width="0.12" height="0.02" depth="0.12"
+                    material="color: #0b1522; metalness: 0.8; roughness: 0.2"></a-box>
+                <!-- Watch Screen Face -->
+                <a-plane position="0 0.011 0" rotation="-90 0 0" width="0.1" height="0.1"
+                    material="color: #030810; shader: flat">
+                    <a-text id="wrist-time-text" value="00:00.0" align="center" width="0.4" color="#00f0ff"
+                        position="0 0.03 0.002"></a-text>
+                    <a-text id="wrist-hr-text" value="HR 138" align="center" width="0.32" color="#ff0055"
+                        position="0 0.0 0.002"></a-text>
+                    <a-text id="wrist-speed-text" value="22.4 km/h" align="center" width="0.28" color="#00ff88"
+                        position="0 -0.025 0.002"></a-text>
+                </a-plane>
+            </a-entity>
+        </a-entity>
+        </a-entity>
+
+        <!-- World Ground Grid (Active in Desktop / Non-AR Fallback mode, fades in Passthrough) -->
+        <a-entity id="world-ground-grid">
+            <a-grid width="200" height="200" divisions="50" color="#00f0ff" opacity="0.15"></a-grid>
+        </a-entity>
+
+        <!-- 3D AR Waypoint Route Polyline & Destination Beacon -->
+        <a-entity id="ar-route-container">
+            <!-- 3D Pulsing Destination Tower -->
+            <a-entity id="dest-beacon" position="0 0 -45">
+                <a-cylinder radius="0.4" height="8"
+                    material="color: #00f0ff; opacity: 0.35; shader: flat; transparent: true"></a-cylinder>
+                <a-ring radius-inner="0.6" radius-outer="1.4" rotation="-90 0 0" material="color: #00f0ff; shader: flat"
+                    animation="property: scale; to: 1.6 1.6 1.6; dir: alternate; loop: true; dur: 1200"></a-ring>
+                <a-text value="DESTINATION WAYPOINT" position="0 4.5 0" align="center" width="8"
+                    color="#00f0ff"></a-text>
+                <a-text id="beacon-dist-text" value="350m" position="0 3.8 0" align="center" width="6"
+                    color="#00ff88"></a-text>
+            </a-entity>
+            <!-- Glowing Ground Pathway Chevrons -->
+            <a-entity id="path-chevrons-group"></a-entity>
+        </a-entity>
+
+        <!-- 3D Teammate Holographic Avatars -->
+        <a-entity id="team-holograms-group">
+            <!-- Alpha-1 -->
+            <a-entity id="teammate-alpha" position="12 0 -22">
+                <a-cylinder radius="0.25" height="1.7" position="0 0.85 0"
+                    material="color: #0072ff; opacity: 0.6; wireframe: true"></a-cylinder>
+                <a-sphere radius="0.18" position="0 1.8 0" material="color: #00f0ff; opacity: 0.8"></a-sphere>
+                <a-text id="holo-alpha-text" value="ALPHA-1 (SARAH)\n12m | PACE 4'10\"" position=" 0 2.2 0"
+                    align="center" width="4.5" color="#00f0ff"></a-text>
+            </a-entity>
+            <!-- Bravo-2 -->
+            <a-entity id="teammate-bravo" position="-18 0 -35">
+                <a-cylinder radius="0.25" height="1.7" position="0 0.85 0"
+                    material="color: #00ff88; opacity: 0.6; wireframe: true"></a-cylinder>
+                <a-sphere radius="0.18" position="0 1.8 0" material="color: #00ff88; opacity: 0.8"></a-sphere>
+                <a-text id="holo-bravo-text" value="BRAVO-2 (MARCUS)\n38m | PACE 4'30\"" position=" 0 2.2 0"
+                    align="center" width="4.5" color="#00ff88"></a-text>
+            </a-entity>
+        </a-entity>
+
+        <!-- 3D Sport Interactive Arenas -->
+        <a-entity id="sport-3d-arena" position="0 0 -8">
+            <!-- Dynamic 3D Sport Elements (Cricket pitch, Pool table, Football grid) inserted here by JS -->
+        </a-entity>
+
+        <!-- Ambient & Tactical Directional Lighting -->
+        <a-light type="ambient" color="#335577"></a-light>
+        <a-light type="directional" color="#00f0ff" intensity="0.6" position="5 10 5"></a-light>
+    </a-scene>
+
+    <!-- ==========================================================================
+       2D DOM OVERLAY HUD INTERFACE (DESKTOP & WEBXR DOM-OVERLAY)
+       ========================================================================== */
+  -->
+    <div id="hud-root">
+        <!-- Scanlines overlay -->
+        <div class="hud-scanlines"></div>
+
+        <!-- Sci-Fi Corner Brackets -->
+        <div class="hud-corner-bracket tl"></div>
+        <div class="hud-corner-bracket tr"></div>
+        <div class="hud-corner-bracket bl"></div>
+        <div class="hud-corner-bracket br"></div>
+
+        <!-- Toast Notification Banner -->
+        <div id="toast-banner" class="hud-toast-banner">
+            <span class="status-dot active"></span>
+            <span id="toast-message">SYSTEM ONLINE: Meta Quest 3S WebXR Passthrough Ready</span>
+        </div>
+
+        <!-- TOP NAVIGATION & STATUS BAR -->
+        <header class="hud-top-bar hud-interactive">
+            <!-- Left: System Identification & Mode Pill -->
+            <div class="hud-system-brand">
+                <div class="hud-logo-icon"></div>
+                <div>
+                    <div class="hud-brand-title">ATHLETE HUD // AR-X</div>
+                    <div class="hud-brand-sub" id="active-sport-subtitle">SPORT: RUNNING & ATHLETICS</div>
+                </div>
+            </div>
+
+            <!-- Center: 360-Degree Digital Heading Compass -->
+            <div class="hud-compass-wrapper">
+                <div class="hud-compass-header">
+                    <span class="hud-compass-heading" id="compass-heading-deg">045°</span>
+                    <span class="hud-compass-cardinal" id="compass-cardinal-dir">NE</span>
+                </div>
+                <div class="hud-compass-tape-container">
+                    <div class="hud-compass-reticle"></div>
+                    <div class="hud-compass-tape" id="compass-tape">
+                        <!-- Programmatically populated by NavigationManager -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Live/Simulation Toggle, Satellite, BLE & Clock -->
+            <div class="hud-top-right">
+                <div class="hud-pill sim-mode" id="sim-mode-pill"
+                    title="Click to toggle Simulation vs Real Hardware sensors">
+                    <span class="status-dot amber" id="sim-status-dot"></span>
+                    <span id="sim-mode-text">SIMULATION</span>
+                </div>
+
+                <div class="hud-pill" id="ble-status-pill" title="BLE Wearable Status [Click to Connect]">
+                    <span class="status-dot" id="ble-status-dot"></span>
+                    <span id="ble-status-text">BLE DISC</span>
+                </div>
+
+                <div class="hud-pill" id="gps-status-pill" title="Current GPS Coordinates">
+                    <span class="status-dot active" id="gps-status-dot"></span>
+                    <span id="gps-coords-display">37.7749° N, 122.4194° W</span>
+                </div>
+
+                <button class="hud-btn icon-only" id="btn-settings-open" title="Open Calibration & Settings [ESC]">
+                    ⚙
+                </button>
+            </div>
+        </header>
+
+        <!-- MAIN FLANKING VIEWPORT AREA -->
+        <main class="hud-main-body">
+            <!-- LEFT FLANK: PERFORMANCE & KINEMATICS -->
+            <aside class="hud-left-panel hud-interactive">
+                <!-- Speedometer Card -->
+                <div class="hud-card" id="movement-panel-card">
+                    <div class="hud-card-header">
+                        <span class="hud-card-title">⚡ KINEMATIC VELOCITY</span>
+                        <span class="hud-pill" id="hud-accel-pill" style="font-size: 8px; padding: 2px 6px;">ACCEL
+                            1.2G</span>
+                    </div>
+
+                    <div class="hud-speedometer-box">
+                        <!-- SVG Semi-Circular Speed Gauge -->
+                        <svg class="hud-speed-gauge-svg" viewBox="0 0 200 120">
+                            <path d="M 20 105 A 80 80 0 0 1 180 105" fill="none" stroke="rgba(0, 240, 255, 0.15)"
+                                stroke-width="12" stroke-linecap="round" />
+                            <path id="speed-gauge-arc" d="M 20 105 A 80 80 0 0 1 180 105" fill="none"
+                                stroke="url(#cyanGradient)" stroke-width="12" stroke-linecap="round"
+                                stroke-dasharray="251" stroke-dashoffset="150" />
+                            <defs>
+                                <linearGradient id="cyanGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                    <stop offset="0%" stop-color="#00f0ff" />
+                                    <stop offset="70%" stop-color="#00ff88" />
+                                    <stop offset="100%" stop-color="#ff0055" />
+                                </linearGradient>
+                            </defs>
+                        </svg>
+
+                        <div class="hud-speed-val-display">
+                            <span class="hud-speed-num" id="telemetry-speed">24.6</span>
+                            <span class="hud-speed-unit" id="telemetry-speed-unit">KM/H</span>
+                        </div>
+                    </div>
+
+                    <!-- Metric Matrix -->
+                    <div class="hud-metric-grid">
+                        <div class="hud-metric-tile">
+                            <span class="hud-metric-label">AVG VELOCITY</span>
+                            <span class="hud-metric-value" id="telemetry-avg-speed">21.8 <span
+                                    class="hud-metric-sub">km/h</span></span>
+                        </div>
+                        <div class="hud-metric-tile">
+                            <span class="hud-metric-label">MAX VELOCITY</span>
+                            <span class="hud-metric-value" id="telemetry-max-speed">32.4 <span
+                                    class="hud-metric-sub">km/h</span></span>
+                        </div>
+                        <div class="hud-metric-tile">
+                            <span class="hud-metric-label">DISTANCE</span>
+                            <span class="hud-metric-value" id="telemetry-dist">4.82 <span
+                                    class="hud-metric-sub">km</span></span>
+                        </div>
+                        <div class="hud-metric-tile">
+                            <span class="hud-metric-label">CADENCE / PACE</span>
+                            <span class="hud-metric-value" id="telemetry-cadence">168 <span
+                                    class="hud-metric-sub">spm</span></span>
+                        </div>
+                    </div>
+
+                    <!-- Acceleration Vector Bar -->
+                    <div class="hud-accel-bar-wrap">
+                        <div style="display: flex; justify-content: space-between; font-size: 9px; color: #8ecbe0;">
+                            <span>ACCELERATION PROFILE</span>
+                            <span id="telemetry-accel-val">+0.85 m/s²</span>
+                        </div>
+                        <div class="hud-progress-track">
+                            <div class="hud-progress-fill" id="telemetry-accel-fill" style="width: 45%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sport Training Status Quick Card -->
+                <div class="hud-card" id="quick-sport-card">
+                    <div class="hud-card-header">
+                        <span class="hud-card-title" id="sport-quick-title">🎯 ATHLETIC PACE TARGET</span>
+                        <button class="hud-btn" id="btn-open-sports" style="padding: 2px 6px; font-size: 9px;">TRAINING
+                            DRILLS</button>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                            <span style="font-size: 11px; color: #a5e2f7;">TARGET PACE</span>
+                            <span
+                                style="font-family: var(--hud-font-mono); font-size: 16px; font-weight: 700; color: #00ff88;"
+                                id="sport-stat-primary">4'20" /km</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                            <span style="font-size: 11px; color: #a5e2f7;">CURRENT SPLIT DELTA</span>
+                            <span style="font-family: var(--hud-font-mono); font-size: 14px; color: #00f0ff;"
+                                id="sport-stat-secondary">-0'08" Ahead</span>
+                        </div>
+                        <div style="font-size: 10px; color: #70b8d2;" id="sport-stat-desc">
+                            Ghost Runner Interval: Target locked on 10k Personal Best.
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- CENTER VIEWPORT: WAYPOINT BANNER & HUD DOCK -->
+            <div class="hud-center-view">
+                <!-- Next Route Turn Guidance Banner (Toggleable with 'N') -->
+                <div class="hud-ar-nav-target hud-interactive" id="nav-guidance-banner">
+                    <div class="hud-nav-instruction">
+                        <span class="hud-nav-arrow-icon" id="nav-arrow-symbol">⮞</span>
+                        <span id="nav-instruction-text">CONTINUE ON STADIUM LOOP ROAD</span>
+                    </div>
+                    <div class="hud-nav-dist-eta" id="nav-dist-eta-text">
+                        DISTANCE: 185m • ETA: 00:32 • WAYPOINT 3 OF 8
+                    </div>
+                </div>
+
+                <!-- Central Floating Dock (Stopwatch & Main Control Toggles) -->
+                <div class="hud-dock-bar">
+                    <!-- Stopwatch Widget -->
+                    <div class="hud-dock-stopwatch">
+                        <span class="hud-dock-time" id="dock-stopwatch-display">00:14:32.4</span>
+                        <span class="hud-dock-lap-pill" id="dock-lap-count">LAP 3</span>
+                        <button class="hud-btn success" id="btn-stopwatch-toggle"
+                            title="Start / Pause Workout [Space]">PAUSE</button>
+                        <button class="hud-btn" id="btn-stopwatch-lap" title="Record Lap Split [T]">LAP</button>
+                    </div>
+
+                    <!-- Quick Navigation Panel Toggles -->
+                    <div class="hud-dock-actions">
+                        <button class="hud-btn" id="btn-toggle-minimap" title="Toggle Minimap Radar [M]">🗺
+                            RADAR</button>
+                        <button class="hud-btn" id="btn-toggle-health" title="Toggle Health Panel [H]">❤ HEALTH</button>
+                        <button class="hud-btn" id="btn-toggle-nav" title="Toggle Navigation Guidance [N]">🧭
+                            NAV</button>
+                        <button class="hud-btn" id="btn-toggle-sports" title="Sport Training Mode [S]">🏆
+                            SPORTS</button>
+                        <button class="hud-btn" id="btn-toggle-ble" title="Connect Real BLE Sensor">📶 BLE</button>
+                        <button class="hud-btn danger" id="btn-sos-trigger" title="Trigger Emergency SOS [E]">🚨
+                            SOS</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT FLANK: HEALTH, BIOMETRICS & SQUAD -->
+            <aside class="hud-right-panel hud-interactive">
+                <!-- Real-Time Heart Rate & Zone Card (Toggleable with 'H') -->
+                <div class="hud-card hud-hr-card" id="health-panel-card">
+                    <div class="hud-card-header">
+                        <span class="hud-card-title">❤ BIOMETRIC CARDIAC</span>
+                        <span class="hud-pill" id="hr-source-pill" style="font-size: 8px; padding: 2px 6px;">SIMULATED
+                            HR</span>
+                    </div>
+
+                    <div class="hud-hr-main">
+                        <div class="hud-hr-value-wrap">
+                            <span class="hud-hr-number" id="telemetry-hr">146</span>
+                            <span class="hud-hr-unit">BPM</span>
+                        </div>
+                        <!-- Pulsing Heart SVG -->
+                        <svg class="hud-pulse-heart" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                        </svg>
+                    </div>
+
+                    <!-- 5-Zone Activity Intensity Gauge -->
+                    <div class="hud-hr-zones">
+                        <div class="hud-hr-zone-segment z1" id="hr-zone-1" title="Zone 1: Active Recovery (<115 BPM)">
+                        </div>
+                        <div class="hud-hr-zone-segment z2" id="hr-zone-2"
+                            title="Zone 2: Aerobic Endurance (115-135 BPM)"></div>
+                        <div class="hud-hr-zone-segment z3 active" id="hr-zone-3"
+                            title="Zone 3: Tempo / Aerobic (135-155 BPM)"></div>
+                        <div class="hud-hr-zone-segment z4" id="hr-zone-4"
+                            title="Zone 4: Anaerobic Threshold (155-175 BPM)"></div>
+                        <div class="hud-hr-zone-segment z5" id="hr-zone-5"
+                            title="Zone 5: Maximum Performance (>175 BPM)"></div>
+                    </div>
+                    <div class="hud-hr-zone-label">
+                        <span id="hr-zone-name">ZONE 3 • AEROBIC TEMPO</span>
+                        <span id="hr-zone-pct">78% INTENSITY</span>
+                    </div>
+
+                    <!-- Secondary Biometrics -->
+                    <div class="hud-metric-grid" style="margin-top: 10px;">
+                        <div class="hud-metric-tile">
+                            <span class="hud-metric-label">CALORIC BURN</span>
+                            <span class="hud-metric-value" id="telemetry-cal">412 <span
+                                    class="hud-metric-sub">kcal</span></span>
+                        </div>
+                        <div class="hud-metric-tile">
+                            <span class="hud-metric-label">RESTING BASELINE</span>
+                            <span class="hud-metric-value" id="telemetry-resting-hr">58 <span
+                                    class="hud-metric-sub">bpm</span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Teammate Tracking Card -->
+                <div class="hud-card" id="team-panel-card">
+                    <div class="hud-card-header">
+                        <span class="hud-card-title">👥 SQUAD TRACKING</span>
+                        <button class="hud-btn" id="btn-ping-team" style="padding: 2px 6px; font-size: 9px;">📡 PING
+                            SQUAD</button>
+                    </div>
+
+                    <div class="hud-team-list" id="teammate-list-container">
+                        <!-- Teammates rendered dynamically by TeamTracker -->
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- TACTICAL MINIMAP RADAR PANEL -->
+        <div class="hud-minimap-card hud-interactive" id="hud-minimap-panel">
+            <div class="hud-card-header" style="margin-bottom: 6px;">
+                <span class="hud-card-title">📍 TACTICAL RADAR</span>
+                <div class="hud-card-tools">
+                    <button class="hud-btn icon-only" id="btn-radar-zoom"
+                        title="Cycle Radar Range (50m / 250m / 1km)">🔍</button>
+                    <button class="hud-btn icon-only" id="btn-minimap-close" title="Close Minimap">✕</button>
+                </div>
+            </div>
+            <div class="hud-minimap-canvas-wrap">
+                <canvas id="minimap-canvas" width="240" height="170"></canvas>
+                <div class="hud-radar-sweep"></div>
+            </div>
+            <div
+                style="display: flex; justify-content: space-between; font-size: 9px; color: #8ecbe0; margin-top: 6px;">
+                <span>RANGE: <b id="radar-range-label" style="color: #fff;">250m</b></span>
+                <span>WAYPOINTS: <b style="color: #00ff88;" id="radar-waypoint-progress">3/8 REACHED</b></span>
+            </div>
+        </div>
+
+        <!-- DESKTOP HOTKEY GUIDE WIDGET -->
+        <div class="hud-controls-helper hud-interactive" id="desktop-controls-guide">
+            <div style="font-weight: 800; color: #fff; margin-bottom: 2px;">DESKTOP CONTROLS [WINDOWS]</div>
+            <div><span class="hud-key-badge">WASD</span> Move Athlete in Virtual World</div>
+            <div><span class="hud-key-badge">↑ / ↓</span> Accelerate / Decelerate Speed</div>
+            <div><span class="hud-key-badge">← / →</span> Adjust Compass Heading</div>
+            <div><span class="hud-key-badge">SPACE</span> Pause / Resume Tracking</div>
+            <div><span class="hud-key-badge">T</span> Stopwatch Lap / Split</div>
+            <div><span class="hud-key-badge">M</span> Toggle Radar Minimap</div>
+            <div><span class="hud-key-badge">H</span> Toggle Health Biometrics Panel</div>
+            <div><span class="hud-key-badge">N</span> Toggle Route Navigation Panel</div>
+            <div><span class="hud-key-badge">S</span> Select Sport Training Module</div>
+            <div><span class="hud-key-badge">E</span> Trigger Safety SOS</div>
+            <div><span class="hud-key-badge">ESC</span> Settings & Hardware Calibration</div>
+        </div>
+
+        <!-- SPORT-SPECIFIC TRAINING MODAL / CONSOLE -->
+        <div class="hud-sport-modal hud-interactive hidden" id="sport-training-modal">
+            <div class="hud-card-header">
+                <span class="hud-card-title" style="font-size: 14px;">🏆 SPORT-SPECIFIC AI TRAINING MODULES</span>
+                <button class="hud-btn icon-only" id="btn-sport-modal-close">✕</button>
+            </div>
+
+            <!-- Sport Selection Tabs -->
+            <div class="hud-sport-tabs">
+                <button class="hud-sport-tab-btn active" data-sport="running">🏃 Athletics / Running</button>
+                <button class="hud-sport-tab-btn" data-sport="cricket">🏏 Cricket</button>
+                <button class="hud-sport-tab-btn" data-sport="swimming">🏊 Swimming</button>
+                <button class="hud-sport-tab-btn" data-sport="cycling">🚴 Cycling</button>
+                <button class="hud-sport-tab-btn" data-sport="billiards">🎱 Pool / Billiards</button>
+                <button class="hud-sport-tab-btn" data-sport="football">⚽ Football / Soccer</button>
+                <button class="hud-sport-tab-btn" data-sport="custom">⚙ Custom Sport</button>
+            </div>
+
+            <!-- Dynamic Sport Specific Content -->
+            <div class="hud-sport-content" id="sport-module-body">
+                <!-- Rendered dynamically by SportTrainingManager -->
+            </div>
+        </div>
+
+        <!-- EMERGENCY SOS WARNING & COUNTDOWN OVERLAY -->
+        <div class="hud-emergency-overlay hidden" id="emergency-overlay">
+            <div class="hud-emergency-beacon">!</div>
+            <div class="hud-emergency-title" id="emergency-title-text">CRITICAL EMERGENCY DETECTED</div>
+            <div class="hud-emergency-reason" id="emergency-reason-text">
+                High-G Impact Event detected (28.4 m/s²) followed by prolonged cessation of motion.
+            </div>
+            <div class="hud-emergency-countdown" id="emergency-countdown-num">15</div>
+            <div style="font-size: 13px; color: #ffccd9; margin-bottom: 24px; max-width: 480px;">
+                DISPATCHING EMERGENCY PACKET TO SQUAD & FIRST RESPONDERS WITH GPS CO-ORDINATES.
+                PRESS CANCEL IF YOU ARE SAFE.
+            </div>
+            <div class="hud-emergency-actions">
+                <button class="hud-btn success" id="btn-cancel-emergency" style="font-size: 14px; padding: 12px 28px;">
+                    ✓ I AM SAFE — CANCEL SOS
+                </button>
+                <button class="hud-btn danger" id="btn-force-dispatch" style="font-size: 14px; padding: 12px 28px;">
+                    🚨 DISPATCH NOW (MANUAL SOS)
+                </button>
+            </div>
+        </div>
+
+        <!-- SETTINGS & SENSOR CALIBRATION MODAL -->
+        <div class="hud-settings-modal hud-interactive hidden" id="settings-modal">
+            <div class="hud-card-header">
+                <span class="hud-card-title">⚙ SYSTEM CALIBRATION & HARDWARE INTEGRATIONS</span>
+                <button class="hud-btn icon-only" id="btn-settings-close">✕</button>
+            </div>
+
+            <div class="hud-settings-grid">
+                <div class="hud-setting-item">
+                    <label class="hud-setting-label">Telemetry Source Mode</label>
+                    <select class="hud-select" id="setting-telemetry-mode">
+                        <option value="simulated">Simulation Mode (High-Fidelity Demo)</option>
+                        <option value="live">Live Hardware Mode (WebXR / GPS / Sensors)</option>
+                    </select>
+                </div>
+
+                <div class="hud-setting-item">
+                    <label class="hud-setting-label">Measurement Units</label>
+                    <select class="hud-select" id="setting-units">
+                        <option value="metric">Metric (km/h, m, km)</option>
+                        <option value="imperial">Imperial (mph, ft, miles)</option>
+                    </select>
+                </div>
+
+                <div class="hud-setting-item">
+                    <label class="hud-setting-label">Web Bluetooth Heart Rate Device</label>
+                    <button class="hud-btn success" id="btn-connect-ble-modal" style="width: 100%; padding: 8px;">
+                        📶 Pair Bluetooth BLE Chest Strap
+                    </button>
+                </div>
+
+                <div class="hud-setting-item">
+                    <label class="hud-setting-label">Safety Simulation Triggers</label>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="hud-btn danger" id="btn-sim-fall" style="font-size: 9px; flex: 1;">Simulate
+                            Impact/Fall</button>
+                        <button class="hud-btn danger" id="btn-sim-hr-spike" style="font-size: 9px; flex: 1;">Simulate
+                            Cardiac Spike</button>
+                    </div>
+                </div>
+
+                <div class="hud-setting-item">
+                    <label class="hud-setting-label">Meta Quest 3S Wrist HUD</label>
+                    <select class="hud-select" id="setting-wrist-hud">
+                        <option value="enabled">Enabled (Left Wrist Mount)</option>
+                        <option value="disabled">Disabled</option>
+                    </select>
+                </div>
+
+                <div class="hud-setting-item">
+                    <label class="hud-setting-label">Emergency Contact Phone/SMS</label>
+                    <input type="text" class="hud-input" id="setting-emergency-contact" value="+1 (555) 911-TEAM"
+                        placeholder="+1 (555) ...">
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+                <button class="hud-btn success" id="btn-settings-save">Save Configuration</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+       JAVASCRIPT ARCHITECTURE & ENGINE
+       Modular Structure:
+       - SoundFX: Synthesized Audio Feedback (Web Audio API)
+       - CentralStore: Centralized Reactive Store
+       - WearableConnector: Web Bluetooth API Heart Rate Service & Fallback
+       - HealthMonitor: Vitals, Zones & Intensity Analysis
+       - MovementTracker: Kinematics, Speed, Distance, Cadence, G-Force
+       - StopwatchManager: Workout Timer & Lap Engine
+       - NavigationManager: Compass, Waypoints, AR Path, GPS
+       - MinimapManager: 2D Radar Canvas with Dynamic Blips & Sweep
+       - TeamTracker: Squad Roster, Relative Distance & Statuses
+       - EmergencyManager: Multi-Factor Threat Detection & SOS Dispatch
+       - SportTrainingManager: 6 Dedicated Sport Suites + Custom Engine
+       - QuestInputManager: Meta Quest 3S Controllers, Laser, Wrist Watch & WebXR
+       - DesktopInputManager: Keyboard, Mouse, Hotkeys & Simulation Steering
+       - SimulationManager: Synthetic Telemetry Generator for Demonstration
+       - HUDManager: Orchestrator & View Model Renderer
+       ========================================================================== -->
+    <script>
+        'use strict';
+
+        /* ==========================================================================
+           1. SYNTHESIZED AUDIO SUBSYSTEM (Web Audio API)
+           Zero external audio assets; pure browser-synthesized tactical HUD cues.
+           ========================================================================== */
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) {
+                        this.ctx = new AudioContext();
+                    }
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playTone(freq, type = 'sine', duration = 0.1, gainVal = 0.15) {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {
+                    console.warn('Audio playTone error', e);
+                }
+            }
+
+            click() { this.playTone(880, 'sine', 0.05, 0.1); }
+            lap() {
+                this.playTone(523.25, 'sine', 0.1, 0.2);
+                setTimeout(() => this.playTone(659.25, 'sine', 0.15, 0.2), 100);
+            }
+            waypoint() {
+                this.playTone(440, 'triangle', 0.08, 0.15);
+                setTimeout(() => this.playTone(880, 'triangle', 0.12, 0.2), 80);
+            }
+            alarm() {
+                this.playTone(700, 'sawtooth', 0.25, 0.3);
+                setTimeout(() => this.playTone(450, 'sawtooth', 0.25, 0.3), 260);
+            }
+        }
+
+        /* ==========================================================================
+           2. CENTRALIZED REACTIVE STATE STORE
+           ========================================================================== */
+        class CentralStore {
+            constructor() {
+                this.state = {
+                    // System & Environment
+                    mode: 'simulation', // 'simulation' or 'live'
+                    units: 'metric',    // 'metric' or 'imperial'
+                    isXR: false,
+                    isQuest: false,
+                    audioEnabled: true,
+                    emergencyContact: '+1 (555) 911-TEAM',
+
+                    // Navigation & Heading
+                    heading: 45,        // Degrees 0-359
+                    cardinal: 'NE',
+                    lat: 37.7749,
+                    lng: -122.4194,
+                    elevation: 14.5,
+                    destLat: 37.7785,
+                    destLng: -122.4150,
+                    destName: 'Olympic Stadium Northern Gate',
+                    distanceToDest: 350, // metres
+                    etaSeconds: 48,
+                    currentWaypointIdx: 3,
+                    totalWaypoints: 8,
+                    nextInstruction: 'CONTINUE FORWARD ON VELOCITY LOOP',
+
+                    // Kinematics & Movement
+                    speed: 24.6,        // km/h
+                    avgSpeed: 21.8,
+                    maxSpeed: 32.4,
+                    distance: 4.82,     // km
+                    cadence: 168,       // spm or rpm
+                    acceleration: 0.85, // m/s^2
+
+                    // Biometrics & Wearable
+                    heartRate: 146,
+                    restingHR: 58,
+                    hrZone: 3,
+                    calories: 412,
+                    intensityPct: 78,
+                    bleConnected: false,
+                    bleDeviceName: 'None',
+
+                    // Stopwatch
+                    stopwatchRunning: true,
+                    stopwatchElapsedMs: 872400, // 14 mins 32.4s
+                    lapCount: 3,
+                    laps: ['04:28.1', '04:31.5', '04:32.8'],
+
+                    // Active Sport Module
+                    activeSport: 'running', // running, cricket, swimming, cycling, billiards, football, custom
+
+                    // Emergency Subsystem
+                    emergencyActive: false,
+                    emergencyReason: '',
+                    emergencyCountdown: 15,
+                    emergencyDispatched: false,
+
+                    // Teammates Squad Roster
+                    teammates: [
+                        { id: 'T1', name: 'ALPHA-1 (SARAH)', dist: 12, bearing: 30, status: 'SPRINTING', hr: 158, speed: 26.2, color: '#0072ff', x: 12, z: -22 },
+                        { id: 'T2', name: 'BRAVO-2 (MARCUS)', dist: 38, bearing: 310, status: 'PACING', hr: 141, speed: 23.4, color: '#00ff88', x: -18, z: -35 },
+                        { id: 'T3', name: 'ECHO-4 (KENJI)', dist: 84, bearing: 140, status: 'DEFENDING', hr: 135, speed: 18.0, color: '#ffb700', x: 25, z: 40 }
+                    ],
+
+                    // Minimap radar settings
+                    radarRange: 250, // metres
+
+                    // Panel Visibility
+                    minimapVisible: true,
+                    healthPanelVisible: true,
+                    navPanelVisible: true
+                };
+
+                this.listeners = new Map();
+            }
+
+            on(key, callback) {
+                if (!this.listeners.has(key)) {
+                    this.listeners.set(key, []);
+                }
+                this.listeners.get(key).push(callback);
+            }
+
+            set(key, value) {
+                const oldVal = this.state[key];
+                if (oldVal !== value) {
+                    this.state[key] = value;
+                    const callbacks = this.listeners.get(key);
+                    if (callbacks) {
+                        callbacks.forEach(cb => cb(value, oldVal));
+                    }
+                }
+            }
+
+            get(key) {
+                return this.state[key];
+            }
+        }
+
+        const store = new CentralStore();
+        const sound = new SoundFX();
+
+        /* ==========================================================================
+           3. WEARABLE CONNECTOR (Web Bluetooth API Heart Rate Service & Fallback)
+           Implements standard GATT Heart Rate Service (0x180D) and characteristic (0x2A37)
+           ========================================================================== */
+        class WearableConnector {
+            constructor() {
+                this.device = null;
+                this.server = null;
+                this.characteristic = null;
+                this.isSupported = Boolean(navigator.bluetooth);
+            }
+
+            async connectRealDevice() {
+                if (!this.isSupported) {
+                    return {
+                        success: false,
+                        message: 'Web Bluetooth API is not available on this browser. Running high-fidelity simulation.'
+                    };
+                }
+
+                try {
+                    this.device = await navigator.bluetooth.requestDevice({
+                        filters: [{ services: ['heart_rate'] }]
+                    });
+
+                    this.server = await this.device.gatt.connect();
+                    const service = await this.server.getPrimaryService('heart_rate');
+                    this.characteristic = await service.getCharacteristic('heart_rate_measurement');
+
+                    await this.characteristic.startNotifications();
+                    this.characteristic.addEventListener('characteristicvaluechanged', (e) => this.handleHeartRateData(e));
+
+                    this.device.addEventListener('gattserverdisconnected', () => {
+                        store.set('bleConnected', false);
+                        store.set('bleDeviceName', 'Disconnected');
+                    });
+
+                    store.set('bleConnected', true);
+                    store.set('bleDeviceName', this.device.name || 'BLE Heart Sensor');
+                    return { success: true, name: this.device.name };
+                } catch (err) {
+                    console.warn('Bluetooth pairing aborted or error:', err);
+                    return { success: false, message: err.message || 'Pairing cancelled.' };
+                }
+            }
+
+            handleHeartRateData(event) {
+                const value = event.target.value;
+                const flags = value.getUint8(0);
+                let hrValue = 0;
+                if ((flags & 0x01) === 0) {
+                    hrValue = value.getUint8(1);
+                } else {
+                    hrValue = value.getUint16(1, true);
+                }
+                if (hrValue > 30 && hrValue < 240) {
+                    store.set('heartRate', hrValue);
+                    healthMgr.updateZones(hrValue);
+                }
+            }
+
+            disconnect() {
+                if (this.device && this.device.gatt.connected) {
+                    this.device.gatt.disconnect();
+                }
+                store.set('bleConnected', false);
+                store.set('bleDeviceName', 'None');
+            }
+        }
+
+        /* ==========================================================================
+           4. HEALTH MONITOR & CARDIAC ZONE ENGINE
+           ========================================================================== */
+        class HealthMonitor {
+            constructor() {
+                this.maxHR = 195;
+                this.restingHR = 58;
+            }
+
+            updateZones(bpm) {
+                let zone = 1;
+                if (bpm < 115) zone = 1;       // Recovery
+                else if (bpm < 135) zone = 2;  // Aerobic Endurance
+                else if (bpm < 155) zone = 3;  // Tempo
+                else if (bpm < 175) zone = 4;  // Threshold
+                else zone = 5;                 // Anaerobic Max
+
+                const intensity = Math.min(100, Math.round((bpm / this.maxHR) * 100));
+                store.set('hrZone', zone);
+                store.set('intensityPct', intensity);
+
+                // Calorie accumulation estimate
+                if (store.get('stopwatchRunning')) {
+                    const currentCal = store.get('calories');
+                    store.set('calories', currentCal + (intensity > 70 ? 0.05 : 0.025));
+                }
+
+                // Anomaly checking
+                if (bpm > 195 && store.get('mode') !== 'simulation') {
+                    emergencyMgr.triggerThreat('CRITICAL CARDIAC ANOMALY: Heart rate exceeded 195 BPM threshold.');
+                }
+            }
+        }
+
+        /* ==========================================================================
+           5. MOVEMENT TRACKER & KINEMATICS ENGINE
+           ========================================================================== */
+        class MovementTracker {
+            constructor() {
+                this.history = [];
+                this.maxRecords = 60;
+            }
+
+            addVelocitySample(speedKmh) {
+                this.history.push(speedKmh);
+                if (this.history.length > this.maxRecords) {
+                    this.history.shift();
+                }
+
+                const sum = this.history.reduce((a, b) => a + b, 0);
+                const avg = sum / this.history.length;
+                const max = Math.max(...this.history, store.get('maxSpeed'));
+
+                store.set('avgSpeed', parseFloat(avg.toFixed(1)));
+                store.set('maxSpeed', parseFloat(max.toFixed(1)));
+
+                // Accumulate distance if running
+                if (store.get('stopwatchRunning')) {
+                    const distIncrementKm = (speedKmh / 3600) * 0.1; // 100ms interval delta
+                    const currentDist = store.get('distance');
+                    store.set('distance', parseFloat((currentDist + distIncrementKm).toFixed(2)));
+                }
+            }
+
+            setAcceleration(accelMps2) {
+                store.set('acceleration', parseFloat(accelMps2.toFixed(2)));
+                if (accelMps2 > 24.0 && !store.get('emergencyActive')) {
+                    emergencyMgr.triggerThreat(`HIGH-G IMPACT DETECTED (${accelMps2.toFixed(1)} m/s²). Verifying athlete safety.`);
+                }
+            }
+        }
+
+        /* ==========================================================================
+           6. STOPWATCH & LAP MANAGER
+           ========================================================================== */
+        class StopwatchManager {
+            constructor() {
+                this.lastTick = Date.now();
+            }
+
+            start() {
+                this.lastTick = Date.now();
+                store.set('stopwatchRunning', true);
+                sound.click();
+            }
+
+            pause() {
+                store.set('stopwatchRunning', false);
+                sound.click();
+            }
+
+            toggle() {
+                if (store.get('stopwatchRunning')) {
+                    this.pause();
+                } else {
+                    this.start();
+                }
+            }
+
+            lap() {
+                if (!store.get('stopwatchRunning')) return;
+                const currentMs = store.get('stopwatchElapsedMs');
+                const formatted = this.formatTime(currentMs);
+                const laps = [...store.get('laps')];
+                laps.unshift(formatted);
+                if (laps.length > 5) laps.pop();
+
+                store.set('laps', laps);
+                store.set('lapCount', store.get('lapCount') + 1);
+                sound.lap();
+                hudMgr.showToast(`LAP ${store.get('lapCount')} RECORDED: ${formatted}`);
+            }
+
+            tick() {
+                if (!store.get('stopwatchRunning')) return;
+                const now = Date.now();
+                const delta = now - this.lastTick;
+                this.lastTick = now;
+                const elapsed = store.get('stopwatchElapsedMs') + delta;
+                store.set('stopwatchElapsedMs', elapsed);
+            }
+
+            formatTime(ms) {
+                const totalSeconds = Math.floor(ms / 1000);
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                const tenths = Math.floor((ms % 1000) / 100);
+                const pad = (n) => (n < 10 ? '0' + n : n);
+                return `${pad(minutes)}:${pad(seconds)}.${tenths}`;
+            }
+        }
+
+        /* ==========================================================================
+           7. NAVIGATION & AR WAYPOINT MANAGER
+           ========================================================================== */
+        class NavigationManager {
+            constructor() {
+                this.cardinalPoints = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                this.waypoints = [
+                    { text: 'START: SOUTH STADIUM PLAZA', dist: 0 },
+                    { text: 'TURN SLIGHT RIGHT ONTO VELOCITY LANE', dist: 80 },
+                    { text: 'CONTINUE FORWARD ON VELOCITY LOOP', dist: 185 },
+                    { text: 'CROSSING BRIDGE TOWARDS OLYMPIC TRACK', dist: 420 },
+                    { text: 'ENTER NORTH RUNNING CORRIDOR', dist: 750 },
+                    { text: 'DESTINATION: OLYMPIC STADIUM NORTHERN GATE', dist: 1200 }
+                ];
+                this.initProceduralChevrons();
+                this.initGeolocation();
+            }
+
+            initProceduralChevrons() {
+                const group = document.getElementById('path-chevrons-group');
+                if (!group) return;
+                group.innerHTML = '';
+                for (let i = 1; i <= 10; i++) {
+                    const zPos = -i * 4;
+                    const chevron = document.createElement('a-entity');
+                    chevron.setAttribute('position', `0 0.05 ${zPos}`);
+                    chevron.innerHTML = `
+            <a-triangle vertex-a="0 0.01 -0.5" vertex-b="-0.3 0.01 0.4" vertex-c="0.3 0.01 0.4" rotation="-90 0 0" material="color: #00f0ff; opacity: 0.6; shader: flat"></a-triangle>
+          `;
+                    group.appendChild(chevron);
+                }
+            }
+
+            initGeolocation() {
+                if ('geolocation' in navigator) {
+                    navigator.geolocation.watchPosition(
+                        (pos) => {
+                            if (store.get('mode') === 'live') {
+                                store.set('lat', parseFloat(pos.coords.latitude.toFixed(5)));
+                                store.set('lng', parseFloat(pos.coords.longitude.toFixed(5)));
+                                if (pos.coords.speed !== null) {
+                                    store.set('speed', parseFloat((pos.coords.speed * 3.6).toFixed(1)));
+                                }
+                            }
+                        },
+                        (err) => console.log('Geolocation note: using simulation fallback', err.message),
+                        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                    );
+                }
+
+                // Device Orientation for true compass heading in mobile/XR
+                if (window.DeviceOrientationEvent) {
+                    window.addEventListener('deviceorientation', (e) => {
+                        if (store.get('mode') === 'live' && e.alpha !== null) {
+                            const compassHeading = e.webkitCompassHeading !== undefined ? e.webkitCompassHeading : (360 - e.alpha);
+                            this.setHeading(compassHeading);
+                        }
+                    });
+                }
+
+                // Device Motion for physical fall detection
+                if (window.DeviceMotionEvent) {
+                    window.addEventListener('devicemotion', (e) => {
+                        if (store.get('mode') === 'live' && e.accelerationIncludingGravity) {
+                            const acc = e.accelerationIncludingGravity;
+                            const gMag = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+                            if (gMag > 26.0) {
+                                movementMgr.setAcceleration(gMag);
+                            }
+                        }
+                    });
+                }
+            }
+
+            setHeading(degrees) {
+                let norm = Math.round(degrees) % 360;
+                if (norm < 0) norm += 360;
+                store.set('heading', norm);
+
+                const cardIdx = Math.round(norm / 45) % 8;
+                store.set('cardinal', this.cardinalPoints[cardIdx]);
+            }
+
+            updateDestinationProgress(distMetres) {
+                store.set('distanceToDest', Math.max(0, Math.round(distMetres)));
+                const speedKmh = Math.max(5, store.get('speed'));
+                const speedMps = (speedKmh * 1000) / 3600;
+                const eta = Math.round(distMetres / speedMps);
+                store.set('etaSeconds', eta);
+            }
+        }
+
+        /* ==========================================================================
+           8. TEAM TRACKER (SQUAD COORDINATION & LOCATION SHARING)
+           ========================================================================== */
+        class TeamTracker {
+            constructor() {
+                this.container = document.getElementById('teammate-list-container');
+            }
+
+            renderList() {
+                if (!this.container) return;
+                const teammates = store.get('teammates');
+                this.container.innerHTML = teammates.map(tm => `
+          <div class="hud-teammate-row">
+            <div class="hud-teammate-info">
+              <div class="hud-teammate-badge" style="background: ${tm.color};"></div>
+              <div>
+                <div class="hud-teammate-name">${tm.name}</div>
+                <div class="hud-teammate-status">${tm.status} • HR ${tm.hr}</div>
+              </div>
+            </div>
+            <div class="hud-teammate-dist">${tm.dist}m ↗</div>
+          </div>
+        `).join('');
+            }
+
+            pingSquad() {
+                sound.waypoint();
+                hudMgr.showToast('📡 SQUAD PING SENT: Teammate coordinates refreshed');
+            }
+        }
+
+        /* ==========================================================================
+           9. TACTICAL MINIMAP RADAR (Canvas 2D Renderer)
+           ========================================================================== */
+        class MinimapManager {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
+            }
+
+            render() {
+                if (!this.ctx || !store.get('minimapVisible')) return;
+                const w = this.canvas.width;
+                const h = this.canvas.height;
+                const cx = w / 2;
+                const cy = h / 2;
+                const range = store.get('radarRange');
+                const heading = store.get('heading');
+
+                this.ctx.clearRect(0, 0, w, h);
+
+                // Radar concentric circles
+                this.ctx.strokeStyle = 'rgba(0, 240, 255, 0.2)';
+                this.ctx.lineWidth = 1;
+                [0.25, 0.5, 0.75, 1.0].forEach(r => {
+                    this.ctx.beginPath();
+                    this.ctx.arc(cx, cy, (h * 0.44) * r, 0, Math.PI * 2);
+                    this.ctx.stroke();
+                });
+
+                // Crosshairs
+                this.ctx.strokeStyle = 'rgba(0, 240, 255, 0.15)';
+                this.ctx.beginPath();
+                this.ctx.moveTo(cx, 10); this.ctx.lineTo(cx, h - 10);
+                this.ctx.moveTo(10, cy); this.ctx.lineTo(w - 10, cy);
+                this.ctx.stroke();
+
+                // Planned Navigation Route Line
+                this.ctx.strokeStyle = '#00ff88';
+                this.ctx.lineWidth = 2;
+                this.ctx.setLineDash([4, 4]);
+                this.ctx.beginPath();
+                this.ctx.moveTo(cx, cy);
+                this.ctx.lineTo(cx + 25, cy - 35);
+                this.ctx.lineTo(cx + 50, cy - 60);
+                this.ctx.stroke();
+                this.ctx.setLineDash([]);
+
+                // Destination Marker
+                this.ctx.fillStyle = '#00f0ff';
+                this.ctx.beginPath();
+                this.ctx.arc(cx + 50, cy - 60, 4, 0, Math.PI * 2);
+                this.ctx.fill();
+
+                // Teammates Blips
+                const teammates = store.get('teammates');
+                teammates.forEach(tm => {
+                    const scale = (h * 0.42) / range;
+                    const tmDistPx = tm.dist * scale;
+                    const tmRad = ((tm.bearing - heading - 90) * Math.PI) / 180;
+                    const tx = cx + Math.cos(tmRad) * tmDistPx;
+                    const ty = cy + Math.sin(tmRad) * tmDistPx;
+
+                    this.ctx.fillStyle = tm.color || '#0072ff';
+                    this.ctx.beginPath();
+                    this.ctx.arc(tx, ty, 4, 0, Math.PI * 2);
+                    this.ctx.fill();
+                });
+
+                // Player Center Marker (Cone of Heading)
+                this.ctx.save();
+                this.ctx.translate(cx, cy);
+                this.ctx.fillStyle = 'rgba(0, 240, 255, 0.25)';
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, 0);
+                this.ctx.arc(0, 0, 22, -Math.PI / 2 - 0.4, -Math.PI / 2 + 0.4);
+                this.ctx.closePath();
+                this.ctx.fill();
+
+                // Player dot
+                this.ctx.fillStyle = '#ffffff';
+                this.ctx.beginPath();
+                this.ctx.arc(0, 0, 4, 0, Math.PI * 2);
+                this.ctx.fill();
+                this.ctx.restore();
+            }
+        }
+
+        /* ==========================================================================
+           10. EMERGENCY & SAFETY SOS SUBSYSTEM
+           ========================================================================== */
+        class EmergencyManager {
+            constructor() {
+                this.timer = null;
+            }
+
+            triggerThreat(reason) {
+                if (store.get('emergencyActive')) return;
+                store.set('emergencyActive', true);
+                store.set('emergencyReason', reason);
+                store.set('emergencyCountdown', 15);
+                store.set('emergencyDispatched', false);
+                sound.alarm();
+
+                if (this.timer) clearInterval(this.timer);
+                this.timer = setInterval(() => {
+                    let count = store.get('emergencyCountdown');
+                    if (count > 1) {
+                        count--;
+                        store.set('emergencyCountdown', count);
+                        if (count % 2 === 0) sound.alarm();
+                    } else {
+                        clearInterval(this.timer);
+                        this.dispatchEmergency();
+                    }
+                }, 1000);
+            }
+
+            cancel() {
+                if (this.timer) clearInterval(this.timer);
+                store.set('emergencyActive', false);
+                store.set('emergencyDispatched', false);
+                sound.click();
+                hudMgr.showToast('EMERGENCY STAND DOWN: Safety Confirmed by Athlete');
+            }
+
+            dispatchEmergency() {
+                store.set('emergencyDispatched', true);
+                store.set('emergencyCountdown', 0);
+                sound.alarm();
+
+                const payload = {
+                    athleteId: 'ATH-QUEST3S-992',
+                    coords: { lat: store.get('lat'), lng: store.get('lng') },
+                    contact: store.get('emergencyContact'),
+                    timestamp: new Date().toISOString(),
+                    heartRate: store.get('heartRate'),
+                    reason: store.get('emergencyReason')
+                };
+                console.warn('EMERGENCY DISPATCH INITIATED:', payload);
+                hudMgr.showToast(`🚨 SOS DISPATCHED: Coordinates shared with ${store.get('emergencyContact')}`);
+            }
+        }
+
+        /* ==========================================================================
+           11. SPORT-SPECIFIC TRAINING MODULES ENGINE
+           ========================================================================== */
+        class SportTrainingManager {
+            constructor() {
+                this.sports = {
+                    running: {
+                        name: 'Athletics & Running',
+                        badge: 'RUNNING',
+                        icon: '🏃',
+                        stats: [
+                            { label: 'Target Pace', value: "4'20\" /km" },
+                            { label: 'Stride Rate', value: '172 spm' },
+                            { label: 'Ghost Runner', value: '+14m Ahead' },
+                            { label: 'Lap Split', value: "04'18\"" }
+                        ],
+                        render3D: (arena) => {
+                            arena.innerHTML = `
+                <a-plane position="0 0.02 -15" rotation="-90 0 0" width="4" height="40" material="color: #ff3344; opacity: 0.35"></a-plane>
+                <a-text value="SPEED TRACK INTERVAL: 400m" position="0 2 -15" align="center" width="7" color="#00f0ff"></a-text>
+              `;
+                        }
+                    },
+                    cricket: {
+                        name: 'Cricket Performance Hub',
+                        badge: 'CRICKET',
+                        icon: '🏏',
+                        stats: [
+                            { label: 'Bowling Velocity', value: '138.4 km/h' },
+                            { label: 'Pitch Landing Spot', value: 'Good Length (6.2m)' },
+                            { label: 'Predicted Bounce', value: '0.84m (Stump Height)' },
+                            { label: 'Shot Arc Angle', value: 'Cover Drive (42°)' }
+                        ],
+                        render3D: (arena) => {
+                            arena.innerHTML = `
+                <a-plane position="0 0.02 -10" rotation="-90 0 0" width="3.05" height="20.12" material="color: #d2b48c; opacity: 0.7"></a-plane>
+                <a-cylinder position="0 0.45 -1" radius="0.02" height="0.71" color="#f5deb3"></a-cylinder>
+                <a-cylinder position="0.1 0.45 -1" radius="0.02" height="0.71" color="#f5deb3"></a-cylinder>
+                <a-cylinder position="-0.1 0.45 -1" radius="0.02" height="0.71" color="#f5deb3"></a-cylinder>
+                <a-sphere position="0 1.8 -18" radius="0.08" color="#ff0055" animation="property: position; to: 0.05 0.3 -6; dur: 900; loop: true; dir: alternate"></a-sphere>
+                <a-ring position="0.05 0.03 -6" rotation="-90 0 0" radius-inner="0.15" radius-outer="0.25" color="#00ff88"></a-ring>
+                <a-text value="GOOD LENGTH LANDING: 138 km/h" position="0 1.4 -6" align="center" width="4" color="#00ff88"></a-text>
+              `;
+                        }
+                    },
+                    swimming: {
+                        name: 'Aquatic & Swimming Telemetry',
+                        badge: 'SWIMMING',
+                        icon: '🏊',
+                        stats: [
+                            { label: 'Lap Count', value: '18 / 30 Laps' },
+                            { label: 'Stroke Frequency', value: '34 strokes/min' },
+                            { label: 'Pace / 100m', value: "1'14\"" },
+                            { label: 'SWOLF Index', value: '38 (Optimal)' }
+                        ],
+                        render3D: (arena) => {
+                            arena.innerHTML = `
+                <a-plane position="0 0.01 -12" rotation="-90 0 0" width="8" height="25" material="color: #0077be; opacity: 0.4"></a-plane>
+                <a-text value="POOL LANE 4 • 50M OLYMPIC INTERVAL" position="0 2 -10" align="center" width="6" color="#00f0ff"></a-text>
+              `;
+                        }
+                    },
+                    cycling: {
+                        name: 'Cycling & Velodrome HUD',
+                        badge: 'CYCLING',
+                        icon: '🚴',
+                        stats: [
+                            { label: 'Pedal Cadence', value: '92 RPM' },
+                            { label: 'Estimated Power', value: '285 Watts' },
+                            { label: 'Grade / Elevation', value: '+3.8% Climb' },
+                            { label: 'Aerodynamic Drag', value: 'CdA 0.235' }
+                        ],
+                        render3D: (arena) => {
+                            arena.innerHTML = `
+                <a-torus position="0 1.5 -8" radius="3" radius-tubular="0.04" color="#00ff88" opacity="0.6" rotation="0 0 0"></a-torus>
+                <a-text value="AERO TUNNEL: KEEP CADENCE > 90 RPM" position="0 3.2 -8" align="center" width="6" color="#00ff88"></a-text>
+              `;
+                        }
+                    },
+                    billiards: {
+                        name: 'Pool & Billiards AR Trajectory',
+                        badge: 'BILLIARDS',
+                        icon: '🎱',
+                        stats: [
+                            { label: 'Cue Aim Angle', value: '18.4°' },
+                            { label: 'Ghost Ball Contact', value: 'Full Ball (96%)' },
+                            { label: 'Cushion Rebound', value: 'Angle In = Angle Out (32°)' },
+                            { label: 'Pocket Confidence', value: '94% Corner' }
+                        ],
+                        render3D: (arena) => {
+                            arena.innerHTML = `
+                <a-box position="0 0.8 -2.5" width="2.2" height="0.1" depth="1.2" color="#0d5c2e"></a-box>
+                <a-sphere position="-0.4 0.9 -2.5" radius="0.035" color="#ffffff"></a-sphere>
+                <a-sphere position="0.3 0.9 -2.3" radius="0.035" color="#111111"></a-sphere>
+                <a-cylinder position="-0.05 0.9 -2.4" rotation="0 72 90" radius="0.004" height="0.8" color="#00f0ff"></a-cylinder>
+                <a-text value="AR AIM LINE: CORNER POCKET LOCK" position="0 1.2 -2.5" align="center" width="3" color="#00f0ff"></a-text>
+              `;
+                        }
+                    },
+                    football: {
+                        name: 'Football / Soccer Tactical Radar',
+                        badge: 'FOOTBALL',
+                        icon: '⚽',
+                        stats: [
+                            { label: 'Sprint Bursts (>22 km/h)', value: '14 Sprints' },
+                            { label: 'Pitch Heat Zone', value: 'Attacking Right Flank' },
+                            { label: 'Passing Accuracy', value: '88% (22/25)' },
+                            { label: 'Distance Covered', value: '7.8 km' }
+                        ],
+                        render3D: (arena) => {
+                            arena.innerHTML = `
+                <a-plane position="0 0.02 -14" rotation="-90 0 0" width="16" height="24" material="color: #2e7d32; opacity: 0.4; wireframe: true"></a-plane>
+                <a-text value="TACTICAL ATTACKING ZONE 14" position="0 2 -12" align="center" width="7" color="#00ff88"></a-text>
+              `;
+                        }
+                    },
+                    custom: {
+                        name: 'Custom Sports Framework',
+                        badge: 'CUSTOM',
+                        icon: '⚙',
+                        stats: [
+                            { label: 'Custom Metric 1', value: 'Calibrated' },
+                            { label: 'Telemetry Stream', value: 'Active' },
+                            { label: 'Sensor Pipeline', value: 'Zero Latency' },
+                            { label: 'Export Schema', value: 'JSON / FIT' }
+                        ],
+                        render3D: (arena) => {
+                            arena.innerHTML = `<a-text value="CUSTOM SPORT EXTENSION ACTIVE" position="0 2 -10" align="center" width="6" color="#00f0ff"></a-text>`;
+                        }
+                    }
+                };
+            }
+
+            setSport(sportKey) {
+                if (!this.sports[sportKey]) return;
+                store.set('activeSport', sportKey);
+                const sport = this.sports[sportKey];
+
+                const arena = document.getElementById('sport-3d-arena');
+                if (arena && sport.render3D) {
+                    sport.render3D(arena);
+                }
+
+                sound.waypoint();
+                hudMgr.showToast(`SPORT MODULE LOADED: ${sport.name}`);
+            }
+
+            renderSportViz(canvas) {
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                const w = canvas.width;
+                const h = canvas.height;
+                ctx.clearRect(0, 0, w, h);
+
+                const currentSport = store.get('activeSport');
+
+                if (currentSport === 'cricket') {
+                    ctx.strokeStyle = 'rgba(0, 240, 255, 0.3)';
+                    ctx.beginPath();
+                    ctx.arc(w / 2, h / 2, h * 0.4, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    const shots = [
+                        { angle: -30, len: 75, color: '#00ff88', label: 'Cover' },
+                        { angle: -70, len: 85, color: '#00f0ff', label: 'Point' },
+                        { angle: 35, len: 90, color: '#00ff88', label: 'Mid-Wicket' },
+                        { angle: 80, len: 65, color: '#ffb700', label: 'Square Leg' }
+                    ];
+                    shots.forEach(s => {
+                        const rad = (s.angle * Math.PI) / 180;
+                        ctx.strokeStyle = s.color;
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(w / 2, h / 2);
+                        ctx.lineTo(w / 2 + Math.cos(rad) * s.len, h / 2 + Math.sin(rad) * s.len);
+                        ctx.stroke();
+                    });
+                } else if (currentSport === 'billiards') {
+                    ctx.strokeStyle = '#00f0ff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(30, 20, w - 60, h - 40);
+
+                    ctx.strokeStyle = '#00ff88';
+                    ctx.beginPath();
+                    ctx.moveTo(60, h - 40);
+                    ctx.lineTo(w / 2, 20);
+                    ctx.lineTo(w - 60, h - 40);
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.beginPath();
+                    ctx.arc(w / 2, 20, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.strokeStyle = '#00f0ff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    for (let x = 0; x < w; x += 15) {
+                        const y = h / 2 + Math.sin(x * 0.05 + Date.now() * 0.003) * 35;
+                        if (x === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+            }
+        }
+
+        /* ==========================================================================
+           12. SIMULATION MANAGER (HIGH-FIDELITY SYNTHETIC TELEMETRY)
+           Allows full demonstration without physical hardware dependencies.
+           ========================================================================== */
+        class SimulationManager {
+            constructor() {
+                this.step = 0;
+            }
+
+            tick() {
+                if (store.get('mode') !== 'simulation') return;
+                this.step += 0.05;
+
+                // Realistic physiological wave
+                const baseSpeed = 24.0;
+                const currentSpeed = baseSpeed + Math.sin(this.step * 0.4) * 3.5;
+                store.set('speed', parseFloat(currentSpeed.toFixed(1)));
+                movementMgr.addVelocitySample(currentSpeed);
+
+                // Heart rate physiological tracking with variance
+                const baseHR = 142;
+                const targetHR = Math.round(baseHR + (currentSpeed - 20) * 1.8 + Math.sin(this.step * 0.8) * 3);
+                store.set('heartRate', targetHR);
+                healthMgr.updateZones(targetHR);
+
+                // Realistic Compass Turning Simulation
+                const currentHeading = store.get('heading');
+                const headingWander = Math.sin(this.step * 0.15) * 0.4;
+                navMgr.setHeading((currentHeading + headingWander) % 360);
+
+                // Advance route progress
+                const dist = store.get('distanceToDest');
+                if (dist > 10) {
+                    navMgr.updateDestinationProgress(dist - (currentSpeed * 0.1) / 3.6);
+                } else {
+                    navMgr.updateDestinationProgress(500);
+                }
+
+                // Simulate Teammates movement
+                const teammates = store.get('teammates');
+                teammates[0].dist = parseFloat((12 + Math.sin(this.step * 0.3) * 2).toFixed(1));
+                teammates[1].dist = parseFloat((38 + Math.cos(this.step * 0.2) * 3).toFixed(1));
+            }
+        }
+
+        /* ==========================================================================
+           13. DESKTOP INPUT MANAGER (KEYBOARD & MOUSE)
+           ========================================================================== */
+        class DesktopInputManager {
+            constructor() {
+                window.addEventListener('keydown', (e) => this.handleKeyDown(e));
+            }
+
+            handleKeyDown(e) {
+                switch (e.code) {
+                    case 'ArrowLeft':
+                        navMgr.setHeading(store.get('heading') - 5);
+                        break;
+                    case 'ArrowRight':
+                        navMgr.setHeading(store.get('heading') + 5);
+                        break;
+                    case 'ArrowUp':
+                        store.set('speed', Math.min(60, store.get('speed') + 1.5));
+                        movementMgr.setAcceleration(1.8);
+                        break;
+                    case 'ArrowDown':
+                        store.set('speed', Math.max(0, store.get('speed') - 1.5));
+                        movementMgr.setAcceleration(-1.5);
+                        break;
+                    case 'KeyW':
+                        store.set('speed', Math.min(50, store.get('speed') + 0.8));
+                        break;
+                    case 'KeyS':
+                        // If Ctrl or Alt is not pressed, handle S for Sport module toggle
+                        if (!e.ctrlKey && !e.metaKey) {
+                            hudMgr.toggleSportsModal();
+                        }
+                        break;
+                    case 'KeyA':
+                        navMgr.setHeading(store.get('heading') - 3);
+                        break;
+                    case 'KeyD':
+                        navMgr.setHeading(store.get('heading') + 3);
+                        break;
+                    case 'Space':
+                        e.preventDefault();
+                        stopwatchMgr.toggle();
+                        break;
+                    case 'KeyT':
+                        stopwatchMgr.lap();
+                        break;
+                    case 'KeyM':
+                        hudMgr.toggleMinimap();
+                        break;
+                    case 'KeyH':
+                        hudMgr.toggleHealthPanel();
+                        break;
+                    case 'KeyN':
+                        hudMgr.toggleNavPanel();
+                        break;
+                    case 'KeyE':
+                        emergencyMgr.triggerThreat('MANUAL USER SOS INITIATED FROM DESKTOP HOTKEY [E]');
+                        break;
+                    case 'Escape':
+                        hudMgr.toggleSettingsModal();
+                        break;
+                }
+            }
+        }
+
+        /* ==========================================================================
+           14. META QUEST 3S INPUT MANAGER (WebXR Gamepads & Hand Tracking)
+           ========================================================================== */
+        class QuestInputManager {
+            constructor() {
+                this.setupSceneEvents();
+            }
+
+            setupSceneEvents() {
+                const scene = document.querySelector('a-scene');
+                if (!scene) return;
+
+                scene.addEventListener('enter-vr', () => {
+                    store.set('isXR', true);
+                    store.set('isQuest', true);
+                    hudMgr.showToast('ENTERED IMMERSIVE XR (QUEST 3S PASSTHROUGH ACTIVE)');
+                });
+
+                scene.addEventListener('exit-vr', () => {
+                    store.set('isXR', false);
+                    hudMgr.showToast('EXITED IMMERSIVE XR: DESKTOP MODE ACTIVE');
+                });
+
+                const rightCtrl = document.getElementById('right-controller');
+                if (rightCtrl) {
+                    rightCtrl.addEventListener('triggerdown', () => sound.click());
+                }
+
+                const leftCtrl = document.getElementById('left-controller');
+                if (leftCtrl) {
+                    leftCtrl.addEventListener('triggerdown', () => sound.click());
+                }
+            }
+        }
+
+        /* ==========================================================================
+           15. HUD VIEW MANAGER & DOM SYNC CONTROLLER
+           ========================================================================== */
+        class HUDManager {
+            constructor() {
+                this.buildCompassTape();
+                this.bindDOMEvents();
+            }
+
+            buildCompassTape() {
+                const tape = document.getElementById('compass-tape');
+                if (!tape) return;
+                tape.innerHTML = '';
+                for (let deg = -180; deg <= 540; deg += 5) {
+                    const tick = document.createElement('div');
+                    tick.className = 'hud-compass-tick';
+                    const isMajor = deg % 45 === 0;
+                    if (isMajor) tick.classList.add('major');
+
+                    const bar = document.createElement('div');
+                    bar.className = 'hud-compass-tick-bar';
+                    tick.appendChild(bar);
+
+                    if (isMajor) {
+                        let labelDeg = deg % 360;
+                        if (labelDeg < 0) labelDeg += 360;
+                        let label = labelDeg.toString();
+                        if (labelDeg === 0) label = 'N';
+                        else if (labelDeg === 45) label = 'NE';
+                        else if (labelDeg === 90) label = 'E';
+                        else if (labelDeg === 135) label = 'SE';
+                        else if (labelDeg === 180) label = 'S';
+                        else if (labelDeg === 225) label = 'SW';
+                        else if (labelDeg === 270) label = 'W';
+                        else if (labelDeg === 315) label = 'NW';
+                        const span = document.createElement('span');
+                        span.textContent = label;
+                        tick.appendChild(span);
+                    }
+                    tape.appendChild(tick);
+                }
+            }
+
+            bindDOMEvents() {
+                // Simulation Toggle Pill
+                const simPill = document.getElementById('sim-mode-pill');
+                if (simPill) {
+                    simPill.addEventListener('click', () => {
+                        const current = store.get('mode');
+                        const next = current === 'simulation' ? 'live' : 'simulation';
+                        store.set('mode', next);
+                        this.showToast(`TELEMETRY SWITCHED TO: ${next.toUpperCase()} MODE`);
+                        sound.click();
+                    });
+                }
+
+                // Stopwatch Controls
+                document.getElementById('btn-stopwatch-toggle')?.addEventListener('click', () => stopwatchMgr.toggle());
+                document.getElementById('btn-stopwatch-lap')?.addEventListener('click', () => stopwatchMgr.lap());
+
+                // Panel Toggles
+                document.getElementById('btn-toggle-minimap')?.addEventListener('click', () => this.toggleMinimap());
+                document.getElementById('btn-minimap-close')?.addEventListener('click', () => this.toggleMinimap(false));
+                document.getElementById('btn-toggle-health')?.addEventListener('click', () => this.toggleHealthPanel());
+                document.getElementById('btn-toggle-nav')?.addEventListener('click', () => this.toggleNavPanel());
+                document.getElementById('btn-toggle-sports')?.addEventListener('click', () => this.toggleSportsModal());
+                document.getElementById('btn-open-sports')?.addEventListener('click', () => this.toggleSportsModal());
+                document.getElementById('btn-sport-modal-close')?.addEventListener('click', () => this.toggleSportsModal(false));
+
+                // Settings Dialog
+                document.getElementById('btn-settings-open')?.addEventListener('click', () => this.toggleSettingsModal(true));
+                document.getElementById('btn-settings-close')?.addEventListener('click', () => this.toggleSettingsModal(false));
+                document.getElementById('btn-settings-save')?.addEventListener('click', () => {
+                    const modeVal = document.getElementById('setting-telemetry-mode').value;
+                    const unitsVal = document.getElementById('setting-units').value;
+                    const contactVal = document.getElementById('setting-emergency-contact').value;
+                    store.set('mode', modeVal);
+                    store.set('units', unitsVal);
+                    store.set('emergencyContact', contactVal);
+                    this.toggleSettingsModal(false);
+                    this.showToast('SETTINGS SAVED: Config updated');
+                });
+
+                // BLE Pairing
+                document.getElementById('btn-toggle-ble')?.addEventListener('click', () => this.connectBLE());
+                document.getElementById('btn-connect-ble-modal')?.addEventListener('click', () => this.connectBLE());
+
+                // Emergency Buttons
+                document.getElementById('btn-sos-trigger')?.addEventListener('click', () => {
+                    emergencyMgr.triggerThreat('USER MANUAL SOS TRIGGERED (HUD PANEL BUTTON)');
+                });
+                document.getElementById('btn-cancel-emergency')?.addEventListener('click', () => emergencyMgr.cancel());
+                document.getElementById('btn-force-dispatch')?.addEventListener('click', () => emergencyMgr.dispatchEmergency());
+
+                // Emergency Simulations
+                document.getElementById('btn-sim-fall')?.addEventListener('click', () => {
+                    this.toggleSettingsModal(false);
+                    movementMgr.setAcceleration(28.4);
+                });
+                document.getElementById('btn-sim-hr-spike')?.addEventListener('click', () => {
+                    this.toggleSettingsModal(false);
+                    store.set('heartRate', 205);
+                    emergencyMgr.triggerThreat('SIMULATED CRITICAL CARDIAC REDLINE (>200 BPM)');
+                });
+
+                // Sport Tab Click Handlers
+                document.querySelectorAll('.hud-sport-tab-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        document.querySelectorAll('.hud-sport-tab-btn').forEach(b => b.classList.remove('active'));
+                        const targetBtn = e.currentTarget;
+                        targetBtn.classList.add('active');
+                        const sportKey = targetBtn.getAttribute('data-sport');
+                        sportMgr.setSport(sportKey);
+                        this.renderSportModalContent(sportKey);
+                    });
+                });
+
+                // Minimap Range Zoom
+                document.getElementById('btn-radar-zoom')?.addEventListener('click', () => {
+                    const current = store.get('radarRange');
+                    const next = current === 50 ? 250 : current === 250 ? 1000 : 50;
+                    store.set('radarRange', next);
+                    document.getElementById('radar-range-label').textContent = `${next}m`;
+                    sound.click();
+                });
+
+                // Squad Ping
+                document.getElementById('btn-ping-team')?.addEventListener('click', () => {
+                    teamTracker.pingSquad();
+                });
+            }
+
+            async connectBLE() {
+                const res = await bleConnector.connectRealDevice();
+                if (res.success) {
+                    this.showToast(`BLUETOOTH CONNECTED: ${res.name}`);
+                } else {
+                    this.showToast(res.message);
+                }
+            }
+
+            toggleMinimap(state) {
+                const panel = document.getElementById('hud-minimap-panel');
+                if (!panel) return;
+                const cur = !panel.classList.contains('hidden');
+                const next = typeof state === 'boolean' ? state : !cur;
+                panel.classList.toggle('hidden', !next);
+                store.set('minimapVisible', next);
+                sound.click();
+            }
+
+            toggleHealthPanel(state) {
+                const card = document.getElementById('health-panel-card');
+                if (!card) return;
+                const cur = !card.classList.contains('hidden');
+                const next = typeof state === 'boolean' ? state : !cur;
+                card.classList.toggle('hidden', !next);
+                store.set('healthPanelVisible', next);
+                sound.click();
+            }
+
+            toggleNavPanel(state) {
+                const banner = document.getElementById('nav-guidance-banner');
+                if (!banner) return;
+                const cur = !banner.classList.contains('hidden');
+                const next = typeof state === 'boolean' ? state : !cur;
+                banner.classList.toggle('hidden', !next);
+                store.set('navPanelVisible', next);
+                sound.click();
+            }
+
+            toggleSportsModal(state) {
+                const modal = document.getElementById('sport-training-modal');
+                if (!modal) return;
+                const willOpen = typeof state === 'boolean' ? state : modal.classList.contains('hidden');
+                modal.classList.toggle('hidden', !willOpen);
+                if (willOpen) {
+                    this.renderSportModalContent(store.get('activeSport'));
+                }
+                sound.click();
+            }
+
+            toggleSettingsModal(state) {
+                const modal = document.getElementById('settings-modal');
+                if (!modal) return;
+                modal.classList.toggle('hidden', typeof state === 'boolean' ? !state : undefined);
+                sound.click();
+            }
+
+            showToast(msg) {
+                const toast = document.getElementById('toast-banner');
+                const text = document.getElementById('toast-message');
+                if (!toast || !text) return;
+                text.textContent = msg;
+                toast.classList.add('show');
+                clearTimeout(this.toastTimeout);
+                this.toastTimeout = setTimeout(() => {
+                    toast.classList.remove('show');
+                }, 3200);
+            }
+
+            renderSportModalContent(sportKey) {
+                const container = document.getElementById('sport-module-body');
+                const sport = sportMgr.sports[sportKey];
+                if (!container || !sport) return;
+
+                let statsHtml = sport.stats.map(s => `
+          <div class="hud-metric-tile">
+            <span class="hud-metric-label">${s.label}</span>
+            <span class="hud-metric-value" style="font-size: 15px;">${s.value}</span>
+          </div>
+        `).join('');
+
+                container.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 15px; font-weight: 800; color: #fff;">
+              ${sport.icon} ${sport.name}
+            </div>
+            <span class="hud-pill active">AI DRILL ANALYZER ACTIVE</span>
+          </div>
+
+          <div class="hud-sport-canvas-wrap">
+            <canvas id="sport-viz-canvas" width="700" height="220"></canvas>
+          </div>
+
+          <div class="hud-metric-grid" style="grid-template-columns: repeat(4, 1fr);">
+            ${statsHtml}
+          </div>
+        `;
+
+                const canvas = document.getElementById('sport-viz-canvas');
+                if (canvas) {
+                    sportMgr.renderSportViz(canvas);
+                }
+            }
+
+            updateDOM() {
+                // Heading & Compass
+                const heading = store.get('heading');
+                document.getElementById('compass-heading-deg').textContent = `${heading.toString().padStart(3, '0')}°`;
+                document.getElementById('compass-cardinal-dir').textContent = store.get('cardinal');
+
+                const tape = document.getElementById('compass-tape');
+                if (tape) {
+                    const offsetPx = (heading + 180) * (20 / 5);
+                    tape.style.transform = `translateX(-${offsetPx}px)`;
+                }
+
+                // Kinematics & Units
+                const units = store.get('units');
+                const rawSpeed = store.get('speed');
+                const displaySpeed = units === 'imperial' ? (rawSpeed * 0.621371) : rawSpeed;
+                const speedUnit = units === 'imperial' ? 'MPH' : 'KM/H';
+                const distUnit = units === 'imperial' ? 'mi' : 'km';
+                const rawDist = store.get('distance');
+                const displayDist = units === 'imperial' ? (rawDist * 0.621371) : rawDist;
+
+                document.getElementById('telemetry-speed').textContent = displaySpeed.toFixed(1);
+                document.getElementById('telemetry-speed-unit').textContent = speedUnit;
+                document.getElementById('telemetry-avg-speed').childNodes[0].nodeValue = `${units === 'imperial' ? (store.get('avgSpeed') * 0.621371).toFixed(1) : store.get('avgSpeed')} `;
+                document.getElementById('telemetry-avg-speed').querySelector('.hud-metric-sub').textContent = speedUnit.toLowerCase();
+
+                document.getElementById('telemetry-max-speed').childNodes[0].nodeValue = `${units === 'imperial' ? (store.get('maxSpeed') * 0.621371).toFixed(1) : store.get('maxSpeed')} `;
+                document.getElementById('telemetry-max-speed').querySelector('.hud-metric-sub').textContent = speedUnit.toLowerCase();
+
+                document.getElementById('telemetry-dist').childNodes[0].nodeValue = `${displayDist.toFixed(2)} `;
+                document.getElementById('telemetry-dist').querySelector('.hud-metric-sub').textContent = distUnit;
+
+                const accelVal = store.get('acceleration');
+                document.getElementById('telemetry-accel-val').textContent = `${accelVal > 0 ? '+' : ''}${accelVal} m/s²`;
+                document.getElementById('hud-accel-pill').textContent = `ACCEL ${(Math.abs(accelVal) / 9.8).toFixed(1)}G`;
+
+                // Gauge arc offset
+                const arc = document.getElementById('speed-gauge-arc');
+                if (arc) {
+                    const pct = Math.min(1, rawSpeed / 50);
+                    arc.style.strokeDashoffset = 251 - (251 * pct);
+                }
+
+                // Heart Rate
+                const hr = store.get('heartRate');
+                document.getElementById('telemetry-hr').textContent = hr;
+                const zone = store.get('hrZone');
+                for (let i = 1; i <= 5; i++) {
+                    const seg = document.getElementById(`hr-zone-${i}`);
+                    if (seg) seg.classList.toggle('active', i <= zone);
+                }
+                document.getElementById('hr-zone-name').textContent = `ZONE ${zone} • ${zone === 1 ? 'RECOVERY' : zone === 2 ? 'AEROBIC' : zone === 3 ? 'TEMPO' : zone === 4 ? 'THRESHOLD' : 'MAX REDLINE'
+                    }`;
+                document.getElementById('hr-zone-pct').textContent = `${store.get('intensityPct')}% INTENSITY`;
+                document.getElementById('telemetry-cal').childNodes[0].nodeValue = `${Math.round(store.get('calories'))} `;
+
+                // Stopwatch
+                const elapsed = store.get('stopwatchElapsedMs');
+                const formattedTime = stopwatchMgr.formatTime(elapsed);
+                document.getElementById('dock-stopwatch-display').textContent = formattedTime;
+                document.getElementById('dock-lap-count').textContent = `LAP ${store.get('lapCount')}`;
+
+                const playBtn = document.getElementById('btn-stopwatch-toggle');
+                if (playBtn) {
+                    playBtn.textContent = store.get('stopwatchRunning') ? 'PAUSE' : 'RESUME';
+                    playBtn.className = store.get('stopwatchRunning') ? 'hud-btn danger' : 'hud-btn success';
+                }
+
+                // Navigation Target
+                const distToDest = store.get('distanceToDest');
+                const eta = store.get('etaSeconds');
+                document.getElementById('nav-dist-eta-text').textContent = `DISTANCE: ${distToDest}m • ETA: ${Math.floor(eta / 60)}:${(eta % 60).toString().padStart(2, '0')} • WAYPOINT ${store.get('currentWaypointIdx')} OF ${store.get('totalWaypoints')}`;
+                document.getElementById('gps-coords-display').textContent = `${store.get('lat')}° N, ${Math.abs(store.get('lng'))}° W`;
+
+                // Mode Pill
+                const modePill = document.getElementById('sim-mode-pill');
+                const modeText = document.getElementById('sim-mode-text');
+                const isSim = store.get('mode') === 'simulation';
+                if (modePill && modeText) {
+                    modePill.className = isSim ? 'hud-pill sim-mode' : 'hud-pill live-mode';
+                    modeText.textContent = isSim ? 'SIMULATION' : 'LIVE SENSORS';
+                }
+
+                // BLE Pill
+                const blePill = document.getElementById('ble-status-pill');
+                const bleDot = document.getElementById('ble-status-dot');
+                const bleText = document.getElementById('ble-status-text');
+                const bleConnected = store.get('bleConnected');
+                if (blePill && bleDot && bleText) {
+                    bleDot.className = bleConnected ? 'status-dot active' : 'status-dot';
+                    bleText.textContent = bleConnected ? store.get('bleDeviceName').slice(0, 8) : 'BLE DISC';
+                }
+
+                // Active Sport Title
+                const activeSportKey = store.get('activeSport');
+                const activeSportObj = sportMgr.sports[activeSportKey];
+                if (activeSportObj) {
+                    document.getElementById('active-sport-subtitle').textContent = `SPORT: ${activeSportObj.name.toUpperCase()}`;
+                    document.getElementById('sport-quick-title').textContent = `🎯 ${activeSportObj.name.toUpperCase()} AI TARGET`;
+                }
+
+                // Emergency Overlay
+                const emOverlay = document.getElementById('emergency-overlay');
+                const emActive = store.get('emergencyActive');
+                if (emOverlay) {
+                    emOverlay.classList.toggle('hidden', !emActive);
+                    if (emActive) {
+                        document.getElementById('emergency-reason-text').textContent = store.get('emergencyReason');
+                        document.getElementById('emergency-countdown-num').textContent = store.get('emergencyCountdown');
+                    }
+                }
+
+                // Synchronize 3D Floating In-Headset HUD Elements
+                const vrCompass = document.getElementById('vr-hud-compass-text');
+                if (vrCompass) vrCompass.setAttribute('value', `HEADING: ${heading.toString().padStart(3, '0')}° ${store.get('cardinal')}`);
+                const vrSpeed = document.getElementById('vr-hud-speed-text');
+                if (vrSpeed) vrSpeed.setAttribute('value', displaySpeed.toFixed(1));
+                const vrHR = document.getElementById('vr-hud-hr-text');
+                if (vrHR) vrHR.setAttribute('value', hr.toString());
+                const vrZone = document.getElementById('vr-hud-zone-text');
+                if (vrZone) vrZone.setAttribute('value', `BPM (ZONE ${zone})`);
+
+                // Wrist HUD
+                const wristTime = document.getElementById('wrist-time-text');
+                if (wristTime) wristTime.setAttribute('value', formattedTime);
+                const wristHR = document.getElementById('wrist-hr-text');
+                if (wristHR) wristHR.setAttribute('value', `HR ${hr}`);
+                const wristSpeed = document.getElementById('wrist-speed-text');
+                if (wristSpeed) wristSpeed.setAttribute('value', `${displaySpeed.toFixed(1)} ${speedUnit.toLowerCase()}`);
+            }
+        }
+
+        /* ==========================================================================
+           16. INITIALIZATION & MAIN RAF ANIMATION LOOP
+           ========================================================================== */
+        const bleConnector = new WearableConnector();
+        const healthMgr = new HealthMonitor();
+        const movementMgr = new MovementTracker();
+        const stopwatchMgr = new StopwatchManager();
+        const navMgr = new NavigationManager();
+        const teamTracker = new TeamTracker();
+        const minimapMgr = new MinimapManager('minimap-canvas');
+        const emergencyMgr = new EmergencyManager();
+        const sportMgr = new SportTrainingManager();
+        const simMgr = new SimulationManager();
+        const desktopInputMgr = new DesktopInputManager();
+        const questInputMgr = new QuestInputManager();
+        const hudMgr = new HUDManager();
+
+        // Render initial squad list and sport mode
+        teamTracker.renderList();
+        sportMgr.setSport('running');
+
+        // Main Engine Tick Loop (Every Frame)
+        let lastTime = performance.now();
+        let simCounter = 0;
+
+        function mainTick(currentTime) {
+            requestAnimationFrame(mainTick);
+
+            const delta = currentTime - lastTime;
+            lastTime = currentTime;
+
+            // Update stopwatch elapsed
+            stopwatchMgr.tick();
+
+            // Tick Simulation (every 100ms)
+            simCounter += delta;
+            if (simCounter > 100) {
+                simMgr.tick();
+                teamTracker.renderList();
+                simCounter = 0;
+            }
+
+            // Render Tactical Minimap Radar
+            minimapMgr.render();
+
+            // Update 2D & 3D HUD DOM
+            hudMgr.updateDOM();
+        }
+
+        // Start Animation Loop once DOM is ready
+        window.addEventListener('DOMContentLoaded', () => {
+            requestAnimationFrame(mainTick);
+            hudMgr.showToast('ATHLETE HUD READY: Standalone Meta Quest 3S & Windows Active');
+        });
+
+    </script>
+</body>
+
+</html>
